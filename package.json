@@ -1,0 +1,30 @@
+{
+  "name": "caobo-recibos",
+  "version": "1.0.0",
+  "description": "Smart Accounting Desktop Agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "electron": "electron .",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "devDependencies": {
+    "@nuxt/devtools": "latest",
+    "@nuxtjs/tailwindcss": "^6.14.0",
+    "concurrently": "^8.2.2",
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3",
+    "esbuild": "latest",
+    "nuxt": "latest",
+    "wait-on": "^7.2.0"
+  },
+  "dependencies": {
+    "@pinia/nuxt": "latest",
+    "pinia": "latest"
+  }
+}

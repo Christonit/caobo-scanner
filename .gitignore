@@ -1,0 +1,29 @@
+# Nuxt dev/build outputs
+.output
+.nuxt
+.nitro
+.cache
+dist
+
+# Node
+node_modules
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+python_backend/__pycache__/
+python_backend/*.pyc
+python_backend/venv/
+python_backend/env/
+python_backend/history.json
+python_backend/output.xlsx
+
+# Electron
+dist-electron
+release
+

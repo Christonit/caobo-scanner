@@ -155,11 +155,13 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
 
     Tu tarea es extraer la siguiente informacion del recibo/factura y retornarla en formato JSON para ser utilizado en el sistema de contabilidad:
 
-    - Documento: El numero de documento del recibo/factura. Lo puedes como el valor que tiene "NIF" como label en el recibo/factura. Puede aparecer tanto en la parte superior del recibo/factura como al final del recibo/factura.
+    - documento: El RNC (Registro Nacional del Contribuyente) del suplidor. Es un numero de 9 u 11 digitos que identifica al negocio. Puede aparecer etiquetado como "RNC", "NIF" o "Cedula" en el recibo/factura.
 
-    - Tipo de Suplidor: El tipo de suplidor del recibo/factura. Si la factura tiene RNC, es Gasto Formal el valor. Puedes encontrar el RNC identificado como "NCF" en el recibo/factura.
+    - ncf: El NCF (Numero de Comprobante Fiscal). Es un codigo alfanumerico que empieza con una letra (B, E, etc.) seguido de 11 digitos. Ejemplo: E310001987518, B0100014525. Siempre debe tener el formato LETRA + 11 NUMEROS.
 
-    - Tipo de Gasto: puede ser de estos tipos
+    - tipo_de_suplidor: Si la factura tiene RNC y NCF, es "Gasto Formal". Si no tiene NCF formal, es "Gasto Informal".
+
+    - tipo_de_gasto: Analiza el contenido de la factura y clasifica segun estos tipos:
     01-Gasto de personal
     02-Gastos por trabajos, servicios y suministros
     03-Arrendamientos
@@ -172,15 +174,19 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
     10-Adquisicion de activos
     11-Gastos de seguros
 
-    - Fecha,  debe ser en formato D/MM/YYYY, ej: 1/11/2025. Lo puedes encotrar en la parte superior del recibo/factura o al final del recibo/factura, siempre viene en format "DD/MM/YYYY HH:MM:SS" o "DD-MM-YYYY HH:MM:SS".
+    - descripcion: Una breve descripcion del concepto de la compra (ej: "COMPRA", "GASOLINA", "MATERIALES", etc.)
+
+    - fecha: La fecha de la factura en formato D/MM/YYYY (ej: 1/11/2025). Buscar en la parte superior o inferior del recibo.
    
-   - ITBIS(opcional): El ITBIS del recibo/factura. Lo puedes encontrar al final del recibo/factura, siempre viene en format "ITBIS 18%". A veces hay ITBIS como puede que no haya.
+    - monto_en_servicios: El subtotal antes de impuestos si hay ITBIS/SELECTIVO. Si no hay impuestos, usar el total.
 
-   - SELECTIVO (opcional): Puede aparecer en el recibo/factura como % LEY o Selectivo. 
+    - monto_en_bienes: Monto de compra de bienes (productos fisicos). Dejar en 0 si es solo servicios.
 
-   MONTO: Extraerlo del campo que aparece como subtotal en el recibo/factura cuando o si hay ITBIS o SELECTIVO. Si no hay ITBIS o SELECTIVO, extraerlo del campo que aparece como total en el recibo/factura.
+    - itbis: El monto del ITBIS (18%). Buscar cerca del total, etiquetado como "ITBIS", "IVA" o "18%". Valor numerico sin simbolo.
 
-   - metodo de pago: Identificar el metodo de pago en el recibo/factura. Puede ser de estos tipos:
+    - selectivo: Impuesto selectivo o % LEY si aplica. Normalmente para combustibles y bebidas.
+
+    - metodo_de_pago: Identificar como:
     + EFECTIVO
     + CHEQUES/TRANSFERENCIAS/DEPÓSITO
     + TARJETA CRÉDITO/DÉBITO
@@ -189,8 +195,9 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
     + NOTA DE CREDITO
     + MIXTO
 
-    Tambien, analiza profunda bien y asigna un score de 1 a 3 para calificar que tan seguro es que la informacion extraida es correcta. 3 siendo la mas segura y 1 siendo la menos segura.
-    Retornar la informacion en formato JSON con las siguientes claves: documento, tipo_de_suplidor, tipo_de_gasto, fecha, monto_en_servicios, itbis, selectivo, metodo_de_pago, score.
+    - score: Asigna un score de 1 a 3 para calificar que tan seguro estas de la informacion extraida. 3 = muy seguro, 2 = algo seguro, 1 = poco seguro.
+
+    Retornar la informacion en formato JSON con las siguientes claves: documento, ncf, tipo_de_suplidor, tipo_de_gasto, descripcion, fecha, monto_en_servicios, monto_en_bienes, itbis, selectivo, metodo_de_pago, score.
     """
     
     last_error = None
@@ -236,10 +243,13 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
             
             return {
                 "documento": extracted_data.get("documento", ""),
+                "ncf": extracted_data.get("ncf", ""),
                 "tipo_de_suplidor": extracted_data.get("tipo_de_suplidor", ""),
                 "tipo_de_gasto": extracted_data.get("tipo_de_gasto", ""),
+                "descripcion": extracted_data.get("descripcion", ""),
                 "fecha": extracted_data.get("fecha", ""),
                 "monto_en_servicios": float(extracted_data.get("monto_en_servicios", 0)) if extracted_data.get("monto_en_servicios") else 0.0,
+                "monto_en_bienes": float(extracted_data.get("monto_en_bienes", 0)) if extracted_data.get("monto_en_bienes") else 0.0,
                 "itbis": float(extracted_data.get("itbis", 0)) if extracted_data.get("itbis") else 0.0,
                 "selectivo": float(extracted_data.get("selectivo", 0)) if extracted_data.get("selectivo") else 0.0,
                 "metodo_de_pago": extracted_data.get("metodo_de_pago", ""),
@@ -268,10 +278,13 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
     
     return {
         "documento": "",
+        "ncf": "",
         "tipo_de_suplidor": "",
         "tipo_de_gasto": "",
+        "descripcion": "",
         "fecha": "",
         "monto_en_servicios": 0.0,
+        "monto_en_bienes": 0.0,
         "itbis": 0.0,
         "selectivo": 0.0,
         "metodo_de_pago": "",
@@ -302,15 +315,19 @@ def populate_excel_template(data: dict):
             if header:
                 column_map[str(header).lower().strip()] = col_idx
         
+        # Field mappings: data field -> possible column headers in template
         field_mappings = {
-            "documento": ["documento", "file", "archivo", "nombre archivo", "nif"],
-            "tipo_de_suplidor": ["tipo de suplidor", "tipo suplidor", "suplidor tipo"],
+            "documento": ["documento", "rnc", "nif", "ruc"],
+            "ncf": ["ncf", "ncf afectado", "comprobante fiscal"],
+            "tipo_de_suplidor": ["tipo de suplidor", "tipo suplidor"],
             "tipo_de_gasto": ["tipo de gasto", "tipo gasto"],
+            "descripcion": ["decripcion", "descripcion", "concepto", "detalle"],
             "fecha": ["fecha", "date", "fecha factura"],
-            "monto_en_servicios": ["monto en servicios", "monto", "total", "amount", "importe", "valor", "subtotal"],
-            "itbis": ["itbis", "tax", "impuesto", "iva", "itbis facturado"],
-            "selectivo": ["selectivo", "% ley"],
-            "metodo_de_pago": ["metodo de pago", "metodo pago", "pago"],
+            "monto_en_servicios": ["monto en servicios", "monto servicios"],
+            "monto_en_bienes": ["monto en bienes", "monto bienes"],
+            "itbis": ["itbis", "impuesto 1", "iva"],
+            "selectivo": ["selectivo", "impuesto 2", "% ley"],
+            "metodo_de_pago": ["forma de pago", "metodo de pago", "forma pago"],
         }
         
         data_columns = {}
@@ -325,17 +342,24 @@ def populate_excel_template(data: dict):
         while row <= ws.max_row and ws.cell(row=row, column=1).value is not None:
             row += 1
         
-        # Populate data
+        # Populate text fields
         if "documento" in data_columns:
-            ws.cell(row=row, column=data_columns["documento"], value=data.get("documento", "") or data.get("filename", ""))
+            ws.cell(row=row, column=data_columns["documento"], value=data.get("documento", ""))
+        if "ncf" in data_columns:
+            ws.cell(row=row, column=data_columns["ncf"], value=data.get("ncf", ""))
         if "tipo_de_suplidor" in data_columns:
             ws.cell(row=row, column=data_columns["tipo_de_suplidor"], value=data.get("tipo_de_suplidor", ""))
         if "tipo_de_gasto" in data_columns:
             ws.cell(row=row, column=data_columns["tipo_de_gasto"], value=data.get("tipo_de_gasto", ""))
+        if "descripcion" in data_columns:
+            ws.cell(row=row, column=data_columns["descripcion"], value=data.get("descripcion", ""))
         if "fecha" in data_columns:
             ws.cell(row=row, column=data_columns["fecha"], value=data.get("fecha", ""))
+        if "metodo_de_pago" in data_columns:
+            ws.cell(row=row, column=data_columns["metodo_de_pago"], value=data.get("metodo_de_pago", ""))
         
-        for field in ["monto_en_servicios", "itbis", "selectivo"]:
+        # Populate numeric fields
+        for field in ["monto_en_servicios", "monto_en_bienes", "itbis", "selectivo"]:
             if field in data_columns:
                 val = data.get(field, 0)
                 if isinstance(val, str):
@@ -343,10 +367,7 @@ def populate_excel_template(data: dict):
                         val = float(val.replace(",", ""))
                     except ValueError:
                         val = 0.0
-                ws.cell(row=row, column=data_columns[field], value=float(val))
-        
-        if "metodo_de_pago" in data_columns:
-            ws.cell(row=row, column=data_columns["metodo_de_pago"], value=data.get("metodo_de_pago", ""))
+                ws.cell(row=row, column=data_columns[field], value=float(val) if val else 0.0)
         
         # Update auto-filter
         max_col_letter = get_column_letter(ws.max_column)
@@ -433,15 +454,19 @@ def regenerate_excel_from_data(files_data: list):
             if header:
                 column_map[str(header).lower().strip()] = col_idx
         
+        # Field mappings: data field -> possible column headers in template
         field_mappings = {
-            "documento": ["documento", "file", "archivo", "nombre archivo", "nif"],
-            "tipo_de_suplidor": ["tipo de suplidor", "tipo suplidor", "suplidor tipo"],
+            "documento": ["documento", "rnc", "nif", "ruc"],
+            "ncf": ["ncf", "ncf afectado", "comprobante fiscal"],
+            "tipo_de_suplidor": ["tipo de suplidor", "tipo suplidor"],
             "tipo_de_gasto": ["tipo de gasto", "tipo gasto"],
+            "descripcion": ["decripcion", "descripcion", "concepto", "detalle"],
             "fecha": ["fecha", "date", "fecha factura"],
-            "monto_en_servicios": ["monto en servicios", "monto", "total", "amount", "importe", "valor", "subtotal"],
-            "itbis": ["itbis", "tax", "impuesto", "iva", "itbis facturado"],
-            "selectivo": ["selectivo", "% ley"],
-            "metodo_de_pago": ["metodo de pago", "metodo pago", "pago"],
+            "monto_en_servicios": ["monto en servicios", "monto servicios"],
+            "monto_en_bienes": ["monto en bienes", "monto bienes"],
+            "itbis": ["itbis", "impuesto 1", "iva"],
+            "selectivo": ["selectivo", "impuesto 2", "% ley"],
+            "metodo_de_pago": ["forma de pago", "metodo de pago", "forma pago"],
         }
         
         data_columns = {}
@@ -451,24 +476,35 @@ def regenerate_excel_from_data(files_data: list):
                     data_columns[field] = column_map[header_name]
                     break
         
-        # Clear existing data
+        # Clear existing data (except header row), skip merged cells
+        from openpyxl.cell.cell import MergedCell
         for row in range(2, ws.max_row + 1):
             for col in range(1, ws.max_column + 1):
-                ws.cell(row=row, column=col).value = None
+                cell = ws.cell(row=row, column=col)
+                if not isinstance(cell, MergedCell):
+                    cell.value = None
         
         # Populate with all file data
         current_row = 2
         for file_data in files_data:
+            # Text fields
             if "documento" in data_columns:
-                ws.cell(row=current_row, column=data_columns["documento"], value=file_data.get("documento", "") or file_data.get("filename", ""))
+                ws.cell(row=current_row, column=data_columns["documento"], value=file_data.get("documento", ""))
+            if "ncf" in data_columns:
+                ws.cell(row=current_row, column=data_columns["ncf"], value=file_data.get("ncf", ""))
             if "tipo_de_suplidor" in data_columns:
                 ws.cell(row=current_row, column=data_columns["tipo_de_suplidor"], value=file_data.get("tipo_de_suplidor", ""))
             if "tipo_de_gasto" in data_columns:
                 ws.cell(row=current_row, column=data_columns["tipo_de_gasto"], value=file_data.get("tipo_de_gasto", ""))
+            if "descripcion" in data_columns:
+                ws.cell(row=current_row, column=data_columns["descripcion"], value=file_data.get("descripcion", ""))
             if "fecha" in data_columns:
                 ws.cell(row=current_row, column=data_columns["fecha"], value=file_data.get("fecha", ""))
+            if "metodo_de_pago" in data_columns:
+                ws.cell(row=current_row, column=data_columns["metodo_de_pago"], value=file_data.get("metodo_de_pago", ""))
             
-            for field in ["monto_en_servicios", "itbis", "selectivo"]:
+            # Numeric fields
+            for field in ["monto_en_servicios", "monto_en_bienes", "itbis", "selectivo"]:
                 if field in data_columns:
                     val = file_data.get(field, 0)
                     if isinstance(val, str):
@@ -476,10 +512,7 @@ def regenerate_excel_from_data(files_data: list):
                             val = float(val.replace(",", ""))
                         except ValueError:
                             val = 0.0
-                    ws.cell(row=current_row, column=data_columns[field], value=float(val))
-            
-            if "metodo_de_pago" in data_columns:
-                ws.cell(row=current_row, column=data_columns["metodo_de_pago"], value=file_data.get("metodo_de_pago", ""))
+                    ws.cell(row=current_row, column=data_columns[field], value=float(val) if val else 0.0)
             
             current_row += 1
         

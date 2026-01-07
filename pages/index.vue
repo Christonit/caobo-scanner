@@ -111,6 +111,11 @@
                 <th
                   class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
+                  NCF
+                </th>
+                <th
+                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
+                >
                   Tipo de Suplidor
                 </th>
                 <th
@@ -121,12 +126,22 @@
                 <th
                   class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
+                  Descripción
+                </th>
+                <th
+                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
+                >
                   Fecha
                 </th>
                 <th
                   class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
-                  Monto en Servicios
+                  Monto Servicios
+                </th>
+                <th
+                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
+                >
+                  Monto Bienes
                 </th>
                 <th
                   class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
@@ -141,7 +156,7 @@
                 <th
                   class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
-                  Método de Pago
+                  Forma de Pago
                 </th>
                 <th
                   class="px-4 py-4 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider"
@@ -207,7 +222,17 @@
                     type="text"
                     v-model="file.editableData.documento"
                     @focus="startEditing(file)"
-                    class="w-full bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
+                    class="w-28 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors font-mono text-sm"
+                    placeholder="-"
+                  />
+                </td>
+                <!-- NCF -->
+                <td class="px-4 py-3">
+                  <input
+                    type="text"
+                    v-model="file.editableData.ncf"
+                    @focus="startEditing(file)"
+                    class="w-36 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors font-mono text-sm"
                     placeholder="-"
                   />
                 </td>
@@ -217,7 +242,7 @@
                     type="text"
                     v-model="file.editableData.tipo_de_suplidor"
                     @focus="startEditing(file)"
-                    class="w-full bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
+                    class="w-28 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors text-sm"
                     placeholder="-"
                   />
                 </td>
@@ -227,7 +252,17 @@
                     type="text"
                     v-model="file.editableData.tipo_de_gasto"
                     @focus="startEditing(file)"
-                    class="w-full bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
+                    class="w-64 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors text-sm"
+                    placeholder="-"
+                  />
+                </td>
+                <!-- Descripción -->
+                <td class="px-4 py-3">
+                  <input
+                    type="text"
+                    v-model="file.editableData.descripcion"
+                    @focus="startEditing(file)"
+                    class="w-28 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors text-sm"
                     placeholder="-"
                   />
                 </td>
@@ -237,19 +272,32 @@
                     type="text"
                     v-model="file.editableData.fecha"
                     @focus="startEditing(file)"
-                    class="w-full bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
+                    class="w-24 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors text-sm"
                     placeholder="-"
                   />
                 </td>
                 <!-- Monto en Servicios -->
                 <td class="px-4 py-3">
                   <div class="flex items-center">
-                    <span class="text-slate-500 mr-1">$</span>
+                    <span class="text-slate-500 mr-1 text-sm">$</span>
                     <input
                       type="text"
                       v-model="file.editableData.monto_en_servicios"
                       @focus="startEditing(file)"
-                      class="w-24 bg-transparent text-slate-300 font-mono border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
+                      class="w-20 bg-transparent text-slate-300 font-mono text-sm border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
+                      placeholder="-"
+                    />
+                  </div>
+                </td>
+                <!-- Monto en Bienes -->
+                <td class="px-4 py-3">
+                  <div class="flex items-center">
+                    <span class="text-slate-500 mr-1 text-sm">$</span>
+                    <input
+                      type="text"
+                      v-model="file.editableData.monto_en_bienes"
+                      @focus="startEditing(file)"
+                      class="w-20 bg-transparent text-slate-300 font-mono text-sm border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
                       placeholder="-"
                     />
                   </div>
@@ -257,12 +305,12 @@
                 <!-- ITBIS -->
                 <td class="px-4 py-3">
                   <div class="flex items-center">
-                    <span class="text-slate-500 mr-1">$</span>
+                    <span class="text-slate-500 mr-1 text-sm">$</span>
                     <input
                       type="text"
                       v-model="file.editableData.itbis"
                       @focus="startEditing(file)"
-                      class="w-20 bg-transparent text-slate-400 font-mono border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
+                      class="w-20 bg-transparent text-slate-400 font-mono text-sm border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
                       placeholder="-"
                     />
                   </div>
@@ -270,23 +318,23 @@
                 <!-- Selectivo -->
                 <td class="px-4 py-3">
                   <div class="flex items-center">
-                    <span class="text-slate-500 mr-1">$</span>
+                    <span class="text-slate-500 mr-1 text-sm">$</span>
                     <input
                       type="text"
                       v-model="file.editableData.selectivo"
                       @focus="startEditing(file)"
-                      class="w-20 bg-transparent text-slate-400 font-mono border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
+                      class="w-20 bg-transparent text-slate-400 font-mono text-sm border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
                       placeholder="-"
                     />
                   </div>
                 </td>
-                <!-- Método de Pago -->
+                <!-- Forma de Pago -->
                 <td class="px-4 py-3">
                   <input
                     type="text"
                     v-model="file.editableData.metodo_de_pago"
                     @focus="startEditing(file)"
-                    class="w-full bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
+                    class="w-40 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors text-sm"
                     placeholder="-"
                   />
                 </td>
@@ -550,16 +598,16 @@ const addFiles = (fileList) => {
       editableData: {
         filename: file.name,
         documento: "",
+        ncf: "",
         tipo_de_suplidor: "",
         tipo_de_gasto: "",
+        descripcion: "",
         fecha: "",
         monto_en_servicios: "",
+        monto_en_bienes: "",
         itbis: "",
         selectivo: "",
         metodo_de_pago: "",
-        vendor: "",
-        total: "",
-        tax: "",
       },
       score: 0,
       processingTime: null,
@@ -632,25 +680,27 @@ const retryFile = async (fileItem) => {
       fileItem.editableData = {
         filename: fileItem.name,
         documento: result.data.documento || "",
+        ncf: result.data.ncf || "",
         tipo_de_suplidor: result.data.tipo_de_suplidor || "",
         tipo_de_gasto: result.data.tipo_de_gasto || "",
+        descripcion: result.data.descripcion || "",
         fecha: result.data.fecha || "",
         monto_en_servicios: result.data.monto_en_servicios
           ? result.data.monto_en_servicios.toString()
+          : "",
+        monto_en_bienes: result.data.monto_en_bienes
+          ? result.data.monto_en_bienes.toString()
           : "",
         itbis: result.data.itbis ? result.data.itbis.toString() : "",
         selectivo: result.data.selectivo
           ? result.data.selectivo.toString()
           : "",
         metodo_de_pago: result.data.metodo_de_pago || "",
-        date: result.data.date || "",
-        vendor: result.data.vendor || result.data.description || "",
-        total: result.data.total ? result.data.total.toString() : "",
-        tax: result.data.tax ? result.data.tax.toString() : "",
       };
 
       const hasData =
         result.data.documento ||
+        result.data.ncf ||
         result.data.tipo_de_suplidor ||
         result.data.tipo_de_gasto ||
         result.data.fecha ||
@@ -786,26 +836,28 @@ const processAll = async () => {
           fileItem.editableData = {
             filename: fileItem.name,
             documento: result.data.documento || "",
+            ncf: result.data.ncf || "",
             tipo_de_suplidor: result.data.tipo_de_suplidor || "",
             tipo_de_gasto: result.data.tipo_de_gasto || "",
+            descripcion: result.data.descripcion || "",
             fecha: result.data.fecha || "",
             monto_en_servicios: result.data.monto_en_servicios
               ? result.data.monto_en_servicios.toString()
+              : "",
+            monto_en_bienes: result.data.monto_en_bienes
+              ? result.data.monto_en_bienes.toString()
               : "",
             itbis: result.data.itbis ? result.data.itbis.toString() : "",
             selectivo: result.data.selectivo
               ? result.data.selectivo.toString()
               : "",
             metodo_de_pago: result.data.metodo_de_pago || "",
-            date: result.data.date || "",
-            vendor: result.data.vendor || result.data.description || "",
-            total: result.data.total ? result.data.total.toString() : "",
-            tax: result.data.tax ? result.data.tax.toString() : "",
           };
 
           // Check if extraction returned empty data (needs retry)
           const hasData =
             result.data.documento ||
+            result.data.ncf ||
             result.data.tipo_de_suplidor ||
             result.data.tipo_de_gasto ||
             result.data.fecha ||

@@ -178,13 +178,11 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
 
     - fecha: La fecha de la factura en formato D/MM/YYYY (ej: 1/11/2025). Buscar en la parte superior o inferior del recibo.
    
-    - monto_en_servicios: El subtotal antes de impuestos si hay ITBIS/SELECTIVO. Si no hay impuestos, usar el total.
+    - monto_en_bienes: El subtotal antes de impuestos si hay ITBIS/SELECTIVO. Si no hay impuestos, usar el total. Este es el monto principal de la compra.
 
-    - monto_en_bienes: Monto de compra de bienes (productos fisicos). Dejar en 0 si es solo servicios.
+    - itbis: El monto del ITBIS (18%). Buscar cerca del total, etiquetado como "ITBIS", "IVA" o "18%". Valor numerico sin simbolo. Normalmente aparece al final del recibo/factura antes del total, si no aparece, dejar en 0.
 
-    - itbis: El monto del ITBIS (18%). Buscar cerca del total, etiquetado como "ITBIS", "IVA" o "18%". Valor numerico sin simbolo.
-
-    - selectivo: Impuesto selectivo o % LEY si aplica. Normalmente para combustibles y bebidas.
+    - selectivo: Impuesto selectivo o % LEY si aplica. Normalmente para combustibles y bebidas. Normalmente aparece al final del recibo/factura antes del total, si no aparece, dejar en 0.
 
     - metodo_de_pago: Identificar como:
     + EFECTIVO
@@ -197,7 +195,7 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
 
     - score: Asigna un score de 1 a 3 para calificar que tan seguro estas de la informacion extraida. 3 = muy seguro, 2 = algo seguro, 1 = poco seguro.
 
-    Retornar la informacion en formato JSON con las siguientes claves: documento, ncf, tipo_de_suplidor, tipo_de_gasto, descripcion, fecha, monto_en_servicios, monto_en_bienes, itbis, selectivo, metodo_de_pago, score.
+    Retornar la informacion en formato JSON con las siguientes claves: documento, ncf, tipo_de_suplidor, tipo_de_gasto, descripcion, fecha, monto_en_bienes, itbis, selectivo, metodo_de_pago, score.
     """
     
     last_error = None
@@ -248,7 +246,6 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
                 "tipo_de_gasto": extracted_data.get("tipo_de_gasto", ""),
                 "descripcion": extracted_data.get("descripcion", ""),
                 "fecha": extracted_data.get("fecha", ""),
-                "monto_en_servicios": float(extracted_data.get("monto_en_servicios", 0)) if extracted_data.get("monto_en_servicios") else 0.0,
                 "monto_en_bienes": float(extracted_data.get("monto_en_bienes", 0)) if extracted_data.get("monto_en_bienes") else 0.0,
                 "itbis": float(extracted_data.get("itbis", 0)) if extracted_data.get("itbis") else 0.0,
                 "selectivo": float(extracted_data.get("selectivo", 0)) if extracted_data.get("selectivo") else 0.0,
@@ -283,7 +280,6 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
         "tipo_de_gasto": "",
         "descripcion": "",
         "fecha": "",
-        "monto_en_servicios": 0.0,
         "monto_en_bienes": 0.0,
         "itbis": 0.0,
         "selectivo": 0.0,
@@ -323,7 +319,6 @@ def populate_excel_template(data: dict):
             "tipo_de_gasto": ["tipo de gasto", "tipo gasto"],
             "descripcion": ["decripcion", "descripcion", "concepto", "detalle"],
             "fecha": ["fecha", "date", "fecha factura"],
-            "monto_en_servicios": ["monto en servicios", "monto servicios"],
             "monto_en_bienes": ["monto en bienes", "monto bienes"],
             "itbis": ["itbis", "impuesto 1", "iva"],
             "selectivo": ["selectivo", "impuesto 2", "% ley"],
@@ -359,7 +354,7 @@ def populate_excel_template(data: dict):
             ws.cell(row=row, column=data_columns["metodo_de_pago"], value=data.get("metodo_de_pago", ""))
         
         # Populate numeric fields
-        for field in ["monto_en_servicios", "monto_en_bienes", "itbis", "selectivo"]:
+        for field in ["monto_en_bienes", "itbis", "selectivo"]:
             if field in data_columns:
                 val = data.get(field, 0)
                 if isinstance(val, str):
@@ -462,7 +457,6 @@ def regenerate_excel_from_data(files_data: list):
             "tipo_de_gasto": ["tipo de gasto", "tipo gasto"],
             "descripcion": ["decripcion", "descripcion", "concepto", "detalle"],
             "fecha": ["fecha", "date", "fecha factura"],
-            "monto_en_servicios": ["monto en servicios", "monto servicios"],
             "monto_en_bienes": ["monto en bienes", "monto bienes"],
             "itbis": ["itbis", "impuesto 1", "iva"],
             "selectivo": ["selectivo", "impuesto 2", "% ley"],
@@ -504,7 +498,7 @@ def regenerate_excel_from_data(files_data: list):
                 ws.cell(row=current_row, column=data_columns["metodo_de_pago"], value=file_data.get("metodo_de_pago", ""))
             
             # Numeric fields
-            for field in ["monto_en_servicios", "monto_en_bienes", "itbis", "selectivo"]:
+            for field in ["monto_en_bienes", "itbis", "selectivo"]:
                 if field in data_columns:
                     val = file_data.get(field, 0)
                     if isinstance(val, str):

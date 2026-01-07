@@ -136,11 +136,6 @@
                 <th
                   class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
-                  Monto Servicios
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
                   Monto Bienes
                 </th>
                 <th
@@ -275,19 +270,6 @@
                     class="w-24 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors text-sm"
                     placeholder="-"
                   />
-                </td>
-                <!-- Monto en Servicios -->
-                <td class="px-4 py-3">
-                  <div class="flex items-center">
-                    <span class="text-slate-500 mr-1 text-sm">$</span>
-                    <input
-                      type="text"
-                      v-model="file.editableData.monto_en_servicios"
-                      @focus="startEditing(file)"
-                      class="w-20 bg-transparent text-slate-300 font-mono text-sm border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
-                      placeholder="-"
-                    />
-                  </div>
                 </td>
                 <!-- Monto en Bienes -->
                 <td class="px-4 py-3">
@@ -603,7 +585,6 @@ const addFiles = (fileList) => {
         tipo_de_gasto: "",
         descripcion: "",
         fecha: "",
-        monto_en_servicios: "",
         monto_en_bienes: "",
         itbis: "",
         selectivo: "",
@@ -631,8 +612,7 @@ const isEdited = (file) => {
     file.editableData.tipo_de_suplidor !== file.originalData.tipo_de_suplidor ||
     file.editableData.tipo_de_gasto !== file.originalData.tipo_de_gasto ||
     file.editableData.fecha !== file.originalData.fecha ||
-    file.editableData.monto_en_servicios !==
-      file.originalData.monto_en_servicios ||
+    file.editableData.monto_en_bienes !== file.originalData.monto_en_bienes ||
     file.editableData.itbis !== file.originalData.itbis ||
     file.editableData.selectivo !== file.originalData.selectivo ||
     file.editableData.metodo_de_pago !== file.originalData.metodo_de_pago ||
@@ -685,9 +665,6 @@ const retryFile = async (fileItem) => {
         tipo_de_gasto: result.data.tipo_de_gasto || "",
         descripcion: result.data.descripcion || "",
         fecha: result.data.fecha || "",
-        monto_en_servicios: result.data.monto_en_servicios
-          ? result.data.monto_en_servicios.toString()
-          : "",
         monto_en_bienes: result.data.monto_en_bienes
           ? result.data.monto_en_bienes.toString()
           : "",
@@ -704,7 +681,7 @@ const retryFile = async (fileItem) => {
         result.data.tipo_de_suplidor ||
         result.data.tipo_de_gasto ||
         result.data.fecha ||
-        result.data.monto_en_servicios > 0 ||
+        result.data.monto_en_bienes > 0 ||
         result.data.score > 0;
 
       if (hasData) {
@@ -841,9 +818,6 @@ const processAll = async () => {
             tipo_de_gasto: result.data.tipo_de_gasto || "",
             descripcion: result.data.descripcion || "",
             fecha: result.data.fecha || "",
-            monto_en_servicios: result.data.monto_en_servicios
-              ? result.data.monto_en_servicios.toString()
-              : "",
             monto_en_bienes: result.data.monto_en_bienes
               ? result.data.monto_en_bienes.toString()
               : "",
@@ -861,7 +835,7 @@ const processAll = async () => {
             result.data.tipo_de_suplidor ||
             result.data.tipo_de_gasto ||
             result.data.fecha ||
-            result.data.monto_en_servicios > 0 ||
+            result.data.monto_en_bienes > 0 ||
             result.data.score > 0;
 
           if (hasData) {
@@ -902,7 +876,7 @@ const downloadExcel = async () => {
         tipo_de_suplidor: f.editableData.tipo_de_suplidor || "",
         tipo_de_gasto: f.editableData.tipo_de_gasto || "",
         fecha: f.editableData.fecha || "",
-        monto_en_servicios: f.editableData.monto_en_servicios || "0",
+        monto_en_bienes: f.editableData.monto_en_bienes || "0",
         itbis: f.editableData.itbis || "0",
         selectivo: f.editableData.selectivo || "0",
         metodo_de_pago: f.editableData.metodo_de_pago || "",

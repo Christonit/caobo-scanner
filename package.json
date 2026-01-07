@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Smart Accounting Desktop Agent",
   "private": true,
-  "type": "module",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "nuxt dev",
     "build": "nuxt build",
@@ -11,7 +11,59 @@
     "preview": "nuxt preview",
     "electron": "electron .",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "python:build": "cd python_backend && python3 -m PyInstaller backend.spec --clean",
+    "electron:build": "npm run generate && npm run python:build && electron-builder",
+    "electron:build:mac": "npm run generate && npm run python:build && electron-builder --mac",
+    "electron:build:win": "npm run generate && npm run python:build && electron-builder --win",
+    "electron:build:linux": "npm run generate && npm run python:build && electron-builder --linux",
     "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.caobo.recibos",
+    "productName": "Caobo Recibos",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      ".output/public/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "python_backend/dist/backend",
+        "to": "backend"
+      },
+      {
+        "from": "python_backend/template.xls",
+        "to": "template.xls"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.business",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "devDependencies": {
     "@nuxt/devtools": "latest",

@@ -65,6 +65,86 @@ npm run electron:dev
 - `POST /upload` - Upload and process a receipt file
 - `GET /download` - Download the processed Excel file
 
+## Building for Production
+
+The app bundles both the Nuxt frontend and Python backend into a standalone desktop application that doesn't require users to have Python or Node.js installed.
+
+### Prerequisites
+
+1. **Install PyInstaller** in your Python environment:
+   ```bash
+   cd python_backend
+   source venv/bin/activate
+   pip install pyinstaller
+   ```
+
+2. **Ensure all dependencies are installed:**
+   ```bash
+   npm install
+   pip install -r python_backend/requirements.txt
+   ```
+
+### Build Commands
+
+```bash
+# Build for your current platform (macOS, Windows, or Linux)
+npm run electron:build
+
+# Or build for a specific platform:
+npm run electron:build:mac     # macOS (.dmg, .zip)
+npm run electron:build:win     # Windows (NSIS installer, portable .exe)
+npm run electron:build:linux   # Linux (.AppImage, .deb)
+```
+
+### Build Process Overview
+
+The build process consists of three stages:
+
+1. **Nuxt Generate** (`npm run generate`)
+   - Compiles the Vue/Nuxt frontend into static HTML/JS/CSS files
+   - Output: `.output/public/`
+
+2. **Python Backend Bundling** (`npm run python:build`)
+   - Uses PyInstaller to compile the FastAPI server into a standalone executable
+   - Configuration: `python_backend/backend.spec`
+   - Output: `python_backend/dist/backend`
+
+3. **Electron Packaging** (electron-builder)
+   - Bundles everything into a distributable desktop app
+   - Configuration: `build` section in `package.json`
+   - Output: `dist-electron/`
+
+### Build Output
+
+After a successful build, find your distributable app in `dist-electron/`:
+
+| Platform | Files |
+|----------|-------|
+| macOS    | `Caobo Recibos-x.x.x.dmg`, `Caobo Recibos-x.x.x-mac.zip` |
+| Windows  | `Caobo Recibos Setup x.x.x.exe`, `Caobo Recibos x.x.x.exe` (portable) |
+| Linux    | `Caobo Recibos-x.x.x.AppImage`, `caobo-recibos_x.x.x_amd64.deb` |
+
+### Helper Scripts
+
+For more control, use the shell scripts in `scripts/`:
+
+```bash
+# Build only the Python backend
+./scripts/build-backend.sh
+
+# Complete build (frontend + backend + Electron)
+./scripts/build-all.sh
+```
+
+### Configuration
+
+- **Electron Builder**: `build` section in `package.json`
+- **PyInstaller**: `python_backend/backend.spec`
+- **App Icons**: Place icons in `build/` directory
+  - `icon.icns` (macOS)
+  - `icon.ico` (Windows)
+  - `icon.png` (Linux)
+
 ## Notes
 
 - Currently using dummy data for Gemini processing

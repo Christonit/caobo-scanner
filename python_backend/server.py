@@ -197,7 +197,7 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
     
     for attempt in range(max_retries):
         try:
-            model = genai.GenerativeModel('gemini-2.5-flash')
+            model = genai.GenerativeModel('gemma-3-12b-it')
             file_extension = Path(filename).suffix.lower() if filename else ''
             
             if file_extension in ['.png', '.jpg', '.jpeg']:

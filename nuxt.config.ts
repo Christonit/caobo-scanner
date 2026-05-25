@@ -2,10 +2,11 @@
 
 export default defineNuxtConfig({
   devtools: { enabled: true },
-  ssr: false, // SPA mode required for Electron
   modules: ["@pinia/nuxt", "@nuxtjs/tailwindcss"],
-  app: {
-    baseURL: process.env.NODE_ENV === "production" ? "./" : "/",
+  runtimeConfig: {
+    public: {
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || "http://localhost:8000",
+    },
   },
   vite: {
     optimizeDeps: {
@@ -14,9 +15,6 @@ export default defineNuxtConfig({
       },
     },
     server: {
-      fs: {
-        strict: false,
-      },
       watch: {
         ignored: [
           "**/node_modules/**",

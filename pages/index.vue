@@ -59,8 +59,39 @@
                 Select Files
               </button>
             </div>
-            <p class="text-sm text-slate-500">Supports: PDF, PNG, JPG, JPEG</p>
+            <p class="text-sm text-slate-500">
+              Supports: PDF, PNG, JPG, JPEG · Max {{ MAX_FILE_SIZE_LABEL }} per file
+            </p>
           </div>
+        </div>
+      </div>
+
+      <!-- Rate limit / cooldown banner -->
+      <div
+        v-if="isRateLimited"
+        class="max-w-4xl mx-auto mb-6 px-5 py-4 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-200 flex items-center gap-3"
+      >
+        <svg
+          class="w-6 h-6 flex-shrink-0 text-rose-300"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+        <div class="flex-1">
+          <p class="font-semibold">
+            API rate limit reached ({{ rateLimitUsed }} / {{ RATE_LIMIT_RPM }} per minute)
+          </p>
+          <p class="text-sm text-rose-300/80">
+            You can hit the button again in
+            <span class="font-mono font-bold text-rose-100">{{ cooldownLabel }}</span>.
+          </p>
         </div>
       </div>
 
@@ -357,8 +388,13 @@
                         file.status === 'needs_retry' || file.status === 'error'
                       "
                       @click="retryFile(file)"
-                      class="p-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 hover:text-cyan-300 transition-colors"
-                      title="Retry processing"
+                      :disabled="isRateLimited"
+                      class="p-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 hover:text-cyan-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-cyan-500/20"
+                      :title="
+                        isRateLimited
+                          ? `Rate limited - wait ${cooldownLabel}`
+                          : 'Retry processing'
+                      "
                     >
                       <svg
                         class="w-5 h-5"
@@ -371,6 +407,32 @@
                           stroke-linejoin="round"
                           stroke-width="2"
                           d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        />
+                      </svg>
+                    </button>
+                    <!-- Reevaluate Button (visible for done files with low score: 1 or 2) -->
+                    <button
+                      v-if="file.status === 'done' && file.score > 0 && file.score < 3"
+                      @click="reevaluateFile(file)"
+                      :disabled="isRateLimited"
+                      class="p-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 hover:text-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-purple-500/20"
+                      :title="
+                        isRateLimited
+                          ? `Rate limited - wait ${cooldownLabel}`
+                          : 'Reevaluate with Gemma (low confidence score)'
+                      "
+                    >
+                      <svg
+                        class="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
                         />
                       </svg>
                     </button>
@@ -428,10 +490,23 @@
         >
           <button
             @click="processAll"
-            :disabled="processing || files.every((f) => f.status !== 'pending')"
+            :disabled="
+              processing ||
+              isRateLimited ||
+              files.every((f) => f.status !== 'pending')
+            "
             class="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold rounded-lg shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 transition-all duration-300 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-emerald-500/25"
+            :title="
+              isRateLimited
+                ? `Rate limited - wait ${cooldownLabel}`
+                : 'Process all pending files'
+            "
           >
-            {{ processing ? "Processing..." : "Process All Files" }}
+            <template v-if="processing">Processing...</template>
+            <template v-else-if="isRateLimited">
+              Cooldown · {{ cooldownLabel }}
+            </template>
+            <template v-else>Process All Files</template>
           </button>
           <button
             v-if="files.some((f) => f.status === 'done')"
@@ -446,15 +521,38 @@
           >
             Clear All
           </button>
-          <!-- Total Elapsed Time -->
+          <!-- API usage indicator -->
           <div
-            v-if="totalProcessingTime > 0"
-            class="ml-auto flex items-center gap-2 text-slate-400"
+            class="ml-auto flex items-center gap-4 text-slate-400 text-sm"
           >
-            <span class="text-sm font-medium">Total Elapsed Time:</span>
-            <span class="text-slate-300 font-mono font-semibold">{{
-              formatTime(totalProcessingTime)
-            }}</span>
+            <div class="flex items-center gap-2" :title="`Calls made in the last 60 seconds (limit: ${RATE_LIMIT_RPM})`">
+              <span class="font-medium">API:</span>
+              <span
+                class="font-mono font-semibold"
+                :class="
+                  isRateLimited
+                    ? 'text-rose-300'
+                    : rateLimitUsed >= RATE_LIMIT_RPM - 3
+                    ? 'text-amber-300'
+                    : 'text-slate-300'
+                "
+                >{{ rateLimitUsed }} / {{ RATE_LIMIT_RPM }} per min</span
+              >
+              <span
+                v-if="isRateLimited"
+                class="px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-200 font-mono text-xs"
+                >cooldown {{ cooldownLabel }}</span
+              >
+            </div>
+            <div
+              v-if="totalProcessingTime > 0"
+              class="flex items-center gap-2"
+            >
+              <span class="font-medium">Total Elapsed Time:</span>
+              <span class="text-slate-300 font-mono font-semibold">{{
+                formatTime(totalProcessingTime)
+              }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -533,9 +631,23 @@
 </template>
 
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 
-const API_BASE = "http://localhost:8000";
+const config = useRuntimeConfig();
+const API_BASE = config.public.apiBase;
+
+// --- Upload limits --------------------------------------------------------
+const MAX_FILE_SIZE_BYTES = 3 * 1024 * 1024; // 3 MB
+const MAX_FILE_SIZE_LABEL = "3MB";
+
+// --- Rate limiting (localStorage-backed, shared across tabs) --------------
+// The individual /upload endpoint uses gemma-4-26b, which is capped at
+// 15 requests per minute on the free tier. We track every API-touching
+// action (batch uploads, single retries, reevaluations) so we never exceed
+// that budget regardless of which UI button is clicked.
+const RATE_LIMIT_KEY = "rcp_api_call_timestamps";
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_RPM = 15;
 
 const fileInput = ref(null);
 const files = ref([]);
@@ -543,7 +655,89 @@ const processing = ref(false);
 const previewFile = ref(null);
 const previewUrl = ref(null);
 const totalProcessingTime = ref(0);
+const rateLimitUsed = ref(0);
+const cooldownRemainingSec = ref(0);
 let fileIdCounter = 0;
+let rateLimitTimer = null;
+
+const readTimestamps = () => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(RATE_LIMIT_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(arr)) return [];
+    const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
+    return arr
+      .filter((t) => typeof t === "number" && t > cutoff)
+      .sort((a, b) => a - b);
+  } catch {
+    return [];
+  }
+};
+
+const writeTimestamps = (timestamps) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(RATE_LIMIT_KEY, JSON.stringify(timestamps));
+  } catch {
+    /* localStorage unavailable (private mode, quota) - silently ignore */
+  }
+};
+
+const refreshRateLimitState = () => {
+  const recent = readTimestamps();
+  rateLimitUsed.value = recent.length;
+  if (recent.length >= RATE_LIMIT_RPM) {
+    // The Nth-oldest call (where N = RPM) determines when the limit clears.
+    const targetTimestamp = recent[recent.length - RATE_LIMIT_RPM];
+    const expiresAt = targetTimestamp + RATE_LIMIT_WINDOW_MS;
+    cooldownRemainingSec.value = Math.max(
+      0,
+      Math.ceil((expiresAt - Date.now()) / 1000)
+    );
+  } else {
+    cooldownRemainingSec.value = 0;
+  }
+};
+
+const recordApiCalls = (count = 1) => {
+  const recent = readTimestamps();
+  const now = Date.now();
+  for (let i = 0; i < count; i++) recent.push(now);
+  writeTimestamps(recent);
+  refreshRateLimitState();
+};
+
+const isRateLimited = computed(() => cooldownRemainingSec.value > 0);
+
+const cooldownLabel = computed(() => {
+  const s = cooldownRemainingSec.value;
+  if (s <= 0) return "";
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}m ${rem.toString().padStart(2, "0")}s`;
+});
+
+onMounted(() => {
+  refreshRateLimitState();
+  rateLimitTimer = setInterval(refreshRateLimitState, 1000);
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", onRateLimitStorage);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (rateLimitTimer) clearInterval(rateLimitTimer);
+  if (typeof window !== "undefined") {
+    window.removeEventListener("storage", onRateLimitStorage);
+  }
+});
+
+// Refresh immediately if another tab updates the shared counter.
+const onRateLimitStorage = (event) => {
+  if (event.key === RATE_LIMIT_KEY) refreshRateLimitState();
+};
 
 const handleFileSelect = (event) => {
   const selectedFiles = Array.from(event.target.files);
@@ -567,6 +761,14 @@ const addFiles = (fileList) => {
     ];
     if (!validTypes.includes(file.type)) {
       alert(`${file.name} is not a supported file type`);
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
+      alert(
+        `${file.name} is ${sizeMb}MB which exceeds the ${MAX_FILE_SIZE_LABEL} per-file limit.`
+      );
       return;
     }
 
@@ -636,9 +838,60 @@ const removeFile = (file) => {
   }
 };
 
-const retryFile = async (fileItem) => {
+// Apply an extracted-data payload from the backend to a file item, updating
+// its editableData, score, originalData snapshot and status.
+const applyExtractedData = (fileItem, data) => {
+  fileItem.data = data;
+  fileItem.score = data.score || 0;
+
+  fileItem.editableData = {
+    filename: fileItem.name,
+    documento: data.documento || "",
+    ncf: data.ncf || "",
+    tipo_de_suplidor: data.tipo_de_suplidor || "",
+    tipo_de_gasto: data.tipo_de_gasto || "",
+    descripcion: data.descripcion || "",
+    fecha: data.fecha || "",
+    monto_en_bienes: data.monto_en_bienes ? data.monto_en_bienes.toString() : "",
+    itbis: data.itbis ? data.itbis.toString() : "",
+    selectivo: data.selectivo ? data.selectivo.toString() : "",
+    metodo_de_pago: data.metodo_de_pago || "",
+  };
+
+  const hasData =
+    data.documento ||
+    data.ncf ||
+    data.tipo_de_suplidor ||
+    data.tipo_de_gasto ||
+    data.fecha ||
+    data.monto_en_bienes > 0 ||
+    data.score > 0;
+
+  if (hasData) {
+    fileItem.status = "done";
+    fileItem.originalData = { ...fileItem.editableData };
+  } else {
+    fileItem.status = "needs_retry";
+  }
+};
+
+// Single-file API call shared by Retry (failed/needs_retry) and Reevaluate
+// (done but low-confidence score). Both honor and record against the
+// localStorage rate limit and hit the individual /upload endpoint which is
+// configured to use the gemma-4-26b model on the backend.
+const runSingleFileEvaluation = async (fileItem) => {
+  if (isRateLimited.value) {
+    alert(
+      `Rate limit reached (${RATE_LIMIT_RPM} requests / minute). ` +
+        `Try again in ${cooldownLabel.value}.`
+    );
+    return;
+  }
+
+  const previousStatus = fileItem.status;
   fileItem.status = "retrying";
   const startTime = performance.now();
+  recordApiCalls(1);
 
   try {
     const formData = new FormData();
@@ -654,52 +907,22 @@ const retryFile = async (fileItem) => {
     fileItem.processingTime = endTime - startTime;
 
     if (result.status === "success") {
-      fileItem.data = result.data;
-      fileItem.score = result.data.score || 0;
-
-      fileItem.editableData = {
-        filename: fileItem.name,
-        documento: result.data.documento || "",
-        ncf: result.data.ncf || "",
-        tipo_de_suplidor: result.data.tipo_de_suplidor || "",
-        tipo_de_gasto: result.data.tipo_de_gasto || "",
-        descripcion: result.data.descripcion || "",
-        fecha: result.data.fecha || "",
-        monto_en_bienes: result.data.monto_en_bienes
-          ? result.data.monto_en_bienes.toString()
-          : "",
-        itbis: result.data.itbis ? result.data.itbis.toString() : "",
-        selectivo: result.data.selectivo
-          ? result.data.selectivo.toString()
-          : "",
-        metodo_de_pago: result.data.metodo_de_pago || "",
-      };
-
-      const hasData =
-        result.data.documento ||
-        result.data.ncf ||
-        result.data.tipo_de_suplidor ||
-        result.data.tipo_de_gasto ||
-        result.data.fecha ||
-        result.data.monto_en_bienes > 0 ||
-        result.data.score > 0;
-
-      if (hasData) {
-        fileItem.status = "done";
-        fileItem.originalData = { ...fileItem.editableData };
-      } else {
-        fileItem.status = "needs_retry";
-      }
+      applyExtractedData(fileItem, result.data);
     } else {
       fileItem.status = "error";
     }
   } catch (error) {
-    console.error("Error retrying file:", error);
-    fileItem.status = "error";
+    console.error("Error running single-file evaluation:", error);
+    // Revert to previous status on hard network failure so the user can retry
+    // without losing the existing extracted data (e.g. for low-score rerun).
+    fileItem.status = previousStatus === "done" ? "done" : "error";
     const endTime = performance.now();
     fileItem.processingTime = endTime - startTime;
   }
 };
+
+const retryFile = (fileItem) => runSingleFileEvaluation(fileItem);
+const reevaluateFile = (fileItem) => runSingleFileEvaluation(fileItem);
 
 const isImageFile = (file) => {
   return file.file.type.startsWith("image/");
@@ -771,98 +994,95 @@ const processAll = async () => {
   const overallStartTime = performance.now();
 
   const pendingFiles = files.value.filter((f) => f.status === "pending");
-  // Google Gemini API enforces 5 RPM (requests per minute)
-  const BATCH_SIZE = 5;
+  // Each batch is sent as ONE multipart request to /upload-batch, which forwards
+  // all 10 images to the model in a SINGLE generate_content call. We still
+  // count each batch as 1 against the per-minute API budget, and stop early if
+  // the budget would be exceeded so the user can resume after the cooldown.
+  const BATCH_SIZE = 10;
+  let stoppedForCooldown = false;
 
-  // Process files in batches of 5 (respecting Gemini API rate limit)
   for (let i = 0; i < pendingFiles.length; i += BATCH_SIZE) {
-    const batch = pendingFiles.slice(i, i + BATCH_SIZE);
-    const isNotFirstBatch = i > 0;
-
-    // If this is not the first batch, wait 60 seconds to respect 5 RPM limit
-    if (isNotFirstBatch) {
-      console.log("Waiting 60 seconds for next batch (Gemini 5 RPM limit)...");
-      await new Promise((resolve) => setTimeout(resolve, 60000));
+    if (isRateLimited.value) {
+      stoppedForCooldown = true;
+      break;
     }
 
-    // Process batch in parallel
-    const promises = batch.map(async (fileItem) => {
-      fileItem.status = "processing";
-      const startTime = performance.now();
+    const batch = pendingFiles.slice(i, i + BATCH_SIZE);
 
-      try {
-        const formData = new FormData();
-        formData.append("file", fileItem.file);
+    batch.forEach((f) => {
+      f.status = "processing";
+    });
 
-        const response = await fetch(`${API_BASE}/upload`, {
-          method: "POST",
-          body: formData,
-        });
+    const batchStart = performance.now();
+    recordApiCalls(1);
 
-        const result = await response.json();
-        const endTime = performance.now();
-        fileItem.processingTime = endTime - startTime;
+    try {
+      const formData = new FormData();
+      batch.forEach((fileItem) => {
+        formData.append("files", fileItem.file, fileItem.name);
+      });
 
-        if (result.status === "duplicate") {
+      const response = await fetch(`${API_BASE}/upload-batch`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `Batch upload failed: ${response.status} ${response.statusText}`
+        );
+      }
+
+      const result = await response.json();
+      const batchEnd = performance.now();
+      const perFileTime = (batchEnd - batchStart) / batch.length;
+
+      const results = Array.isArray(result?.results) ? result.results : [];
+
+      batch.forEach((fileItem, idx) => {
+        fileItem.processingTime = perFileTime;
+        const fileResult = results[idx];
+
+        if (!fileResult) {
+          fileItem.status = "error";
+          return;
+        }
+
+        if (fileResult.status === "duplicate") {
           fileItem.status = "duplicate";
-        } else if (result.status === "success") {
-          fileItem.data = result.data;
-          fileItem.score = result.data.score || 0;
-
-          // Update editable data with extracted values
-          fileItem.editableData = {
-            filename: fileItem.name,
-            documento: result.data.documento || "",
-            ncf: result.data.ncf || "",
-            tipo_de_suplidor: result.data.tipo_de_suplidor || "",
-            tipo_de_gasto: result.data.tipo_de_gasto || "",
-            descripcion: result.data.descripcion || "",
-            fecha: result.data.fecha || "",
-            monto_en_bienes: result.data.monto_en_bienes
-              ? result.data.monto_en_bienes.toString()
-              : "",
-            itbis: result.data.itbis ? result.data.itbis.toString() : "",
-            selectivo: result.data.selectivo
-              ? result.data.selectivo.toString()
-              : "",
-            metodo_de_pago: result.data.metodo_de_pago || "",
-          };
-
-          // Check if extraction returned empty data (needs retry)
-          const hasData =
-            result.data.documento ||
-            result.data.ncf ||
-            result.data.tipo_de_suplidor ||
-            result.data.tipo_de_gasto ||
-            result.data.fecha ||
-            result.data.monto_en_bienes > 0 ||
-            result.data.score > 0;
-
-          if (hasData) {
-            fileItem.status = "done";
-            // Save as original for revert functionality
-            fileItem.originalData = { ...fileItem.editableData };
-          } else {
-            fileItem.status = "needs_retry";
-          }
+        } else if (fileResult.status === "success" && fileResult.data) {
+          applyExtractedData(fileItem, fileResult.data);
         } else {
           fileItem.status = "error";
         }
-      } catch (error) {
-        console.error("Error processing file:", error);
-        fileItem.status = "error";
-        const endTime = performance.now();
-        fileItem.processingTime = endTime - startTime;
-      }
-    });
-
-    // Wait for all files in batch to complete
-    await Promise.all(promises);
+      });
+    } catch (error) {
+      console.error("Error processing batch:", error);
+      const batchEnd = performance.now();
+      const perFileTime = (batchEnd - batchStart) / batch.length;
+      // Roll back files that never got a status update so they can be
+      // retried later (instead of being stuck "processing").
+      batch.forEach((fileItem) => {
+        fileItem.processingTime = perFileTime;
+        if (fileItem.status === "processing") {
+          fileItem.status = "error";
+        }
+      });
+    }
   }
 
   const overallEndTime = performance.now();
   totalProcessingTime.value = overallEndTime - overallStartTime;
   processing.value = false;
+
+  if (stoppedForCooldown) {
+    // Files we never reached are still "pending" - the user can click
+    // "Process All Files" again once the cooldown timer hits zero.
+    console.info(
+      `Process stopped early: rate limit reached. ` +
+        `Resume in ${cooldownLabel.value}.`
+    );
+  }
 };
 
 const downloadExcel = async () => {

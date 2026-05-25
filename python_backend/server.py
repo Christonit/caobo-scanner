@@ -9,41 +9,56 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 import openpyxl
 from datetime import datetime
 import pandas as pd
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
 
-# Configure Gemini API key from environment variable
+BASE_DIR = Path(__file__).parent
+DATA_DIR = BASE_DIR
+
+env_path = BASE_DIR / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+    print(f"[INFO] Loaded .env from: {env_path}")
+else:
+    load_dotenv()
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable is not set. Please create a .env file in python_backend/ with GEMINI_API_KEY=your_key")
-
-genai.configure(api_key=GEMINI_API_KEY)
+    print("[WARNING] GEMINI_API_KEY not set. AI features will not work.")
+    print("[WARNING] Create a .env file with GEMINI_API_KEY=your_key")
+else:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="Receipt Processing API")
 
-# CORS middleware to allow requests from Electron
+# CORS: allow the Nuxt frontend (and any local dev origin) to call the API.
+# In production, set ALLOWED_ORIGINS to a comma-separated list of trusted URLs.
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "*")
+allowed_origins = (
+    ["*"] if allowed_origins_env.strip() == "*"
+    else [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict this
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Paths
-BASE_DIR = Path(__file__).parent
-HISTORY_FILE = BASE_DIR / "history.json"
-# Try python_backend first, then root directory
-TEMPLATE_FILE = BASE_DIR / "template.xls" if (BASE_DIR / "template.xls").exists() else BASE_DIR.parent / "template.xls"
-TEMPLATE_XLSX = BASE_DIR / "template_converted.xlsx"  # Converted version for openpyxl
-OUTPUT_FILE = BASE_DIR / "output.xlsx"
+HISTORY_FILE = DATA_DIR / "history.json"
+TEMPLATE_FILE = BASE_DIR / "template.xls"
+TEMPLATE_XLSX = DATA_DIR / "template_converted.xlsx"
+OUTPUT_FILE = DATA_DIR / "output.xlsx"
+
+print(f"[INFO] Base directory: {BASE_DIR}")
+print(f"[INFO] Data directory: {DATA_DIR}")
+print(f"[INFO] Template file: {TEMPLATE_FILE}")
 
 # Ensure history file exists
 if not HISTORY_FILE.exists():
@@ -54,6 +69,16 @@ if not HISTORY_FILE.exists():
 # Using a semaphore to limit concurrent requests
 GEMINI_MAX_CONCURRENT = 5
 gemini_semaphore = asyncio.Semaphore(GEMINI_MAX_CONCURRENT)
+
+# Model selection.
+# - INDIVIDUAL calls (single-file /upload, retry, reevaluate) use gemma-4-26b
+#   (15 RPM on the free tier) so the UI can comfortably allow up to ~15 manual
+#   actions per minute.
+# - BATCH calls (/upload-batch) keep gemma-3-12b-it because the per-batch payload
+#   includes many images at once and the older model has been validated for
+#   that prompt shape.
+INDIVIDUAL_MODEL = "gemma-4-26b"
+BATCH_MODEL = "gemma-3-12b-it"
 
 
 def calculate_file_hash(file_content: bytes) -> str:
@@ -140,18 +165,7 @@ def ensure_template_xlsx():
     return None
 
 
-def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3) -> dict:
-    """
-    Process file with Gemini AI using gemini-2.5-flash model
-    Extracts receipt/invoice data according to Dominican Republic accounting standards
-    Includes retry logic for rate limiting and transient errors
-    """
-    import io
-    import time
-    import re
-    from PIL import Image
-
-    system_prompt = """Tu eres un contador educado y radicado en republica dominicana, te encargas de procesar recibos de pago y facturas de proveedores para luego ingresarlos en el sistema de contabilidad.
+SYSTEM_PROMPT = """Tu eres un contador educado y radicado en republica dominicana, te encargas de procesar recibos de pago y facturas de proveedores para luego ingresarlos en el sistema de contabilidad.
 
     Tu tarea es extraer la siguiente informacion del recibo/factura y retornarla en formato JSON para ser utilizado en el sistema de contabilidad:
 
@@ -177,7 +191,7 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
     - descripcion: Una breve descripcion del concepto de la compra (ej: "COMPRA", "GASOLINA", "MATERIALES", etc.)
 
     - fecha: La fecha de la factura en formato D/MM/YYYY (ej: 1/11/2025). Buscar en la parte superior o inferior del recibo.
-   
+
     - monto_en_bienes: El subtotal antes de impuestos si hay ITBIS/SELECTIVO. Si no hay impuestos, usar el total. Este es el monto principal de la compra.
 
     - itbis: El monto del ITBIS (18%). Buscar cerca del total, etiquetado como "ITBIS", "IVA" o "18%". Valor numerico sin simbolo. Normalmente aparece al final del recibo/factura antes del total, si no aparece, dejar en 0.
@@ -197,39 +211,115 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
 
     Retornar la informacion en formato JSON con las siguientes claves: documento, ncf, tipo_de_suplidor, tipo_de_gasto, descripcion, fecha, monto_en_bienes, itbis, selectivo, metodo_de_pago, score.
     """
-    
+
+
+def _strip_markdown_fences(text: str) -> str:
+    """Remove ```json ... ``` fences that Gemini sometimes adds."""
+    text = text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return text.strip()
+
+
+def _normalize_extracted(extracted: dict, filename: str) -> dict:
+    """Normalize a single extracted-data dict to our expected shape."""
+    def _num(value):
+        if value in (None, ""):
+            return 0.0
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            try:
+                return float(str(value).replace(",", ""))
+            except (TypeError, ValueError):
+                return 0.0
+
+    return {
+        "documento": extracted.get("documento", "") or "",
+        "ncf": extracted.get("ncf", "") or "",
+        "tipo_de_suplidor": extracted.get("tipo_de_suplidor", "") or "",
+        "tipo_de_gasto": extracted.get("tipo_de_gasto", "") or "",
+        "descripcion": extracted.get("descripcion", "") or "",
+        "fecha": extracted.get("fecha", "") or "",
+        "monto_en_bienes": _num(extracted.get("monto_en_bienes")),
+        "itbis": _num(extracted.get("itbis")),
+        "selectivo": _num(extracted.get("selectivo")),
+        "metodo_de_pago": extracted.get("metodo_de_pago", "") or "",
+        "filename": filename,
+        "score": extracted.get("score", 0) or 0,
+    }
+
+
+def _empty_extracted(filename: str, descripcion: str = "") -> dict:
+    """Return an empty/default extracted-data dict for failed processing."""
+    return {
+        "documento": "",
+        "ncf": "",
+        "tipo_de_suplidor": "",
+        "tipo_de_gasto": "",
+        "descripcion": descripcion,
+        "fecha": "",
+        "monto_en_bienes": 0.0,
+        "itbis": 0.0,
+        "selectivo": 0.0,
+        "metodo_de_pago": "",
+        "filename": filename,
+        "score": 0,
+    }
+
+
+def _is_retryable_error(error: Exception) -> bool:
+    error_str = str(error).lower()
+    return (
+        "429" in error_str or "rate" in error_str or "limit" in error_str
+        or "quota" in error_str or "resource" in error_str
+        or "500" in error_str or "502" in error_str or "503" in error_str
+        or "timeout" in error_str or "empty response" in error_str
+    )
+
+
+def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3) -> dict:
+    """
+    Process file with Gemini AI using gemini-2.5-flash model
+    Extracts receipt/invoice data according to Dominican Republic accounting standards
+    Includes retry logic for rate limiting and transient errors
+    """
+    import io
+    import time
+    import re
+    from PIL import Image
+
+    # Check if API key is configured
+    if not GEMINI_API_KEY:
+        print(f"[ERROR] Cannot process {filename}: GEMINI_API_KEY not configured")
+        return _empty_extracted(filename, descripcion="ERROR: API key not configured")
+
     last_error = None
-    
+
     for attempt in range(max_retries):
         try:
-            model = genai.GenerativeModel('gemma-3-12b-it')
+            model = genai.GenerativeModel(INDIVIDUAL_MODEL)
             file_extension = Path(filename).suffix.lower() if filename else ''
-            
+
             if file_extension in ['.png', '.jpg', '.jpeg']:
                 image = Image.open(io.BytesIO(file_content))
-                prompt = f"{system_prompt}\n\nExtrae la informacion del recibo/factura en la imagen y retorna SOLO un objeto JSON valido sin texto adicional, sin markdown, sin explicaciones."
+                prompt = f"{SYSTEM_PROMPT}\n\nExtrae la informacion del recibo/factura en la imagen y retorna SOLO un objeto JSON valido sin texto adicional, sin markdown, sin explicaciones."
                 response = model.generate_content([prompt, image])
-                
+
             elif file_extension == '.pdf':
                 raise ValueError("PDF processing requires additional setup. Please convert PDF to image first.")
             else:
                 raise ValueError(f"Unsupported file type: {file_extension}")
-            
+
             if not response or not hasattr(response, 'text') or not response.text:
                 raise ValueError("Empty response from Gemini API")
-            
-            response_text = response.text.strip()
-            
-            # Clean up markdown code blocks
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            elif response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-            
-            # Parse JSON
+
+            response_text = _strip_markdown_fences(response.text)
+
             try:
                 extracted_data = json.loads(response_text)
             except json.JSONDecodeError:
@@ -238,55 +328,122 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
                     extracted_data = json.loads(json_match.group())
                 else:
                     raise ValueError(f"Could not parse JSON from response")
-            
-            return {
-                "documento": extracted_data.get("documento", ""),
-                "ncf": extracted_data.get("ncf", ""),
-                "tipo_de_suplidor": extracted_data.get("tipo_de_suplidor", ""),
-                "tipo_de_gasto": extracted_data.get("tipo_de_gasto", ""),
-                "descripcion": extracted_data.get("descripcion", ""),
-                "fecha": extracted_data.get("fecha", ""),
-                "monto_en_bienes": float(extracted_data.get("monto_en_bienes", 0)) if extracted_data.get("monto_en_bienes") else 0.0,
-                "itbis": float(extracted_data.get("itbis", 0)) if extracted_data.get("itbis") else 0.0,
-                "selectivo": float(extracted_data.get("selectivo", 0)) if extracted_data.get("selectivo") else 0.0,
-                "metodo_de_pago": extracted_data.get("metodo_de_pago", ""),
-                "filename": filename,
-                "score": extracted_data.get("score", 0)
-            }
-            
+
+            return _normalize_extracted(extracted_data, filename)
+
         except Exception as e:
             last_error = e
-            error_str = str(e).lower()
-            is_retryable = (
-                "429" in error_str or "rate" in error_str or "limit" in error_str or
-                "quota" in error_str or "resource" in error_str or
-                "500" in error_str or "502" in error_str or "503" in error_str or
-                "timeout" in error_str or "empty response" in error_str
-            )
-            
-            if is_retryable and attempt < max_retries - 1:
-                wait_time = 2 ** attempt
-                time.sleep(wait_time)
-            elif not is_retryable:
+            if _is_retryable_error(e) and attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+            elif not _is_retryable_error(e):
                 break
-    
-    # All retries failed
+
     print(f"[ERROR] Gemini processing failed for {filename}: {last_error}")
-    
-    return {
-        "documento": "",
-        "ncf": "",
-        "tipo_de_suplidor": "",
-        "tipo_de_gasto": "",
-        "descripcion": "",
-        "fecha": "",
-        "monto_en_bienes": 0.0,
-        "itbis": 0.0,
-        "selectivo": 0.0,
-        "metodo_de_pago": "",
-        "filename": filename,
-        "score": 0
-    }
+    return _empty_extracted(filename)
+
+
+def process_batch_with_gemini(
+    files: List[Tuple[bytes, str]],
+    max_retries: int = 3,
+) -> List[dict]:
+    """
+    Process MULTIPLE image files with Gemini AI in a SINGLE API call.
+
+    files: list of (file_content, filename) tuples (only image types: png/jpg/jpeg).
+    Returns a list of normalized extracted-data dicts in the same order as input.
+    Falls back to per-file processing if the batch call cannot be parsed back into
+    the expected number of items.
+    """
+    import io
+    import time
+    import re
+    from PIL import Image
+
+    if not files:
+        return []
+
+    if not GEMINI_API_KEY:
+        print("[ERROR] Cannot process batch: GEMINI_API_KEY not configured")
+        return [_empty_extracted(fn, descripcion="ERROR: API key not configured")
+                for _, fn in files]
+
+    # Open all images up front so we can fail fast on corrupt ones.
+    images: List[Optional["Image.Image"]] = []
+    for content, filename in files:
+        try:
+            images.append(Image.open(io.BytesIO(content)))
+        except Exception as e:
+            print(f"[ERROR] Failed to open image {filename}: {e}")
+            images.append(None)
+
+    batch_prompt = (
+        f"{SYSTEM_PROMPT}\n\n"
+        f"IMPORTANTE - Procesamiento por lotes: Te voy a enviar {len(files)} "
+        f"imagenes de recibos/facturas numeradas en orden. Debes procesar CADA "
+        f"imagen y retornar un ARRAY JSON con EXACTAMENTE {len(files)} elementos, "
+        f"uno por cada imagen, en el MISMO ORDEN en que se envian.\n\n"
+        f"Cada elemento del array debe ser un objeto JSON con las claves: "
+        f"documento, ncf, tipo_de_suplidor, tipo_de_gasto, descripcion, fecha, "
+        f"monto_en_bienes, itbis, selectivo, metodo_de_pago, score.\n\n"
+        f"Retorna SOLO el array JSON, sin texto adicional, sin markdown, sin "
+        f"explicaciones."
+    )
+
+    last_error: Optional[Exception] = None
+
+    for attempt in range(max_retries):
+        try:
+            model = genai.GenerativeModel(BATCH_MODEL)
+
+            # Interleave labels + images so Gemini knows which image is which.
+            content_parts: list = [batch_prompt]
+            for i, ((_, filename), image) in enumerate(zip(files, images), start=1):
+                content_parts.append(f"\n--- Imagen #{i} ({filename}) ---")
+                if image is not None:
+                    content_parts.append(image)
+
+            response = model.generate_content(content_parts)
+
+            if not response or not hasattr(response, 'text') or not response.text:
+                raise ValueError("Empty response from Gemini API")
+
+            response_text = _strip_markdown_fences(response.text)
+
+            try:
+                parsed = json.loads(response_text)
+            except json.JSONDecodeError:
+                array_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                if array_match:
+                    parsed = json.loads(array_match.group())
+                else:
+                    raise ValueError("Could not parse JSON array from batch response")
+
+            if isinstance(parsed, dict):
+                parsed = [parsed]
+
+            if not isinstance(parsed, list):
+                raise ValueError(f"Expected JSON array from batch, got {type(parsed).__name__}")
+
+            # Pad / truncate to match input length so caller indexing is safe.
+            results: List[dict] = []
+            for i, (_, filename) in enumerate(files):
+                if i < len(parsed) and isinstance(parsed[i], dict):
+                    results.append(_normalize_extracted(parsed[i], filename))
+                else:
+                    results.append(_empty_extracted(filename))
+            return results
+
+        except Exception as e:
+            last_error = e
+            if _is_retryable_error(e) and attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+            elif not _is_retryable_error(e):
+                break
+
+    print(f"[ERROR] Gemini batch processing failed: {last_error}")
+    # Fall back to per-file processing so a single bad image doesn't fail the whole batch.
+    print(f"[INFO] Falling back to per-file processing for {len(files)} files")
+    return [process_with_gemini(content, filename) for content, filename in files]
 
 
 def populate_excel_template(data: dict):
@@ -428,6 +585,126 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 
+@app.post("/upload-batch")
+async def upload_batch(files: List[UploadFile] = File(...)):
+    """
+    Upload and process MULTIPLE receipt/invoice files in a SINGLE Gemini API call.
+
+    Accepts up to ~10 image files (PNG/JPG/JPEG). PDFs are not supported in batch mode
+    and will be returned with status="error" in the per-file results.
+
+    Returns:
+        {
+            "status": "success",
+            "results": [
+                {"status": "success", "filename": "...", "hash": "...", "data": {...}},
+                {"status": "error",   "filename": "...", "message": "..."},
+                ...
+            ]
+        }
+    Results are in the same order as the uploaded files.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    allowed_extensions = {'.pdf', '.png', '.jpg', '.jpeg'}
+    image_extensions = {'.png', '.jpg', '.jpeg'}
+
+    # Read each upload and classify it. Pending entries will be sent to Gemini.
+    entries: list = []
+    for upload in files:
+        filename = upload.filename or "unknown"
+        ext = Path(filename).suffix.lower()
+
+        if ext not in allowed_extensions:
+            entries.append({
+                "filename": filename,
+                "status": "error",
+                "message": f"Unsupported file type: {ext or 'unknown'}",
+            })
+            continue
+
+        try:
+            content = await upload.read()
+        except Exception as e:
+            entries.append({
+                "filename": filename,
+                "status": "error",
+                "message": f"Failed to read upload: {e}",
+            })
+            continue
+
+        if ext not in image_extensions:
+            entries.append({
+                "filename": filename,
+                "status": "error",
+                "message": "PDF processing is not supported in batch mode",
+            })
+            continue
+
+        entries.append({
+            "filename": filename,
+            "content": content,
+            "hash": calculate_file_hash(content),
+            "status": "pending",
+        })
+
+    batch_inputs: List[Tuple[bytes, str]] = [
+        (e["content"], e["filename"]) for e in entries if e["status"] == "pending"
+    ]
+
+    extracted_results: List[dict] = []
+    if batch_inputs:
+        # Reuse the same semaphore to coordinate concurrency with single uploads.
+        async with gemini_semaphore:
+            extracted_results = await asyncio.to_thread(process_batch_with_gemini, batch_inputs)
+
+    history = load_history()
+    response_results: list = []
+    extracted_idx = 0
+
+    for entry in entries:
+        if entry["status"] == "pending":
+            if extracted_idx < len(extracted_results):
+                data = extracted_results[extracted_idx]
+            else:
+                data = _empty_extracted(entry["filename"])
+            extracted_idx += 1
+
+            try:
+                populate_excel_template(data)
+            except Exception as e:
+                print(f"[ERROR] Excel populate failed for {entry['filename']}: {e}")
+
+            history.append({
+                "hash": entry["hash"],
+                "filename": entry["filename"],
+                "processed_at": datetime.now().isoformat(),
+                "data": data,
+            })
+
+            response_results.append({
+                "status": "success",
+                "filename": entry["filename"],
+                "hash": entry["hash"],
+                "data": data,
+            })
+        else:
+            response_results.append({
+                "status": entry["status"],
+                "filename": entry["filename"],
+                "message": entry.get("message", "Unknown error"),
+            })
+
+    save_history(history)
+
+    return {
+        "status": "success",
+        "count": len(response_results),
+        "results": response_results,
+    }
+
+
 def regenerate_excel_from_data(files_data: list):
     """Regenerate Excel file from edited data. Score is excluded from export."""
     import shutil
@@ -552,10 +829,15 @@ async def download_excel_get():
 
 if __name__ == "__main__":
     import uvicorn
+
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "8000"))
     reload_enabled = os.getenv("RELOAD", "true").lower() != "false"
-    
+
+    print(f"[INFO] Starting server on {host}:{port} (reload={reload_enabled})")
+
     if reload_enabled:
-        uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True, reload_dirs=[str(BASE_DIR)])
+        uvicorn.run("server:app", host=host, port=port, reload=True, reload_dirs=[str(BASE_DIR)])
     else:
-        uvicorn.run(app, host="127.0.0.1", port=8000, reload=False)
+        uvicorn.run(app, host=host, port=port, reload=False)
 

@@ -22,17 +22,8 @@ python_backend/venv/
 python_backend/env/
 python_backend/history.json
 python_backend/output.xlsx
-
-# PyInstaller
-python_backend/build/
-python_backend/dist/
-*.spec.bak
-
-# Electron
-dist-electron
-release
+python_backend/template_converted.xlsx
 
 # Environment
 .env
 .env.local
-

@@ -68,11 +68,11 @@
 
       <!-- Rate limit / cooldown banner -->
       <div
-        v-if="isRateLimited"
-        class="max-w-4xl mx-auto mb-6 px-5 py-4 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-200 flex items-center gap-3"
+        v-if="batchLimit.isLimited.value || individualLimit.isLimited.value"
+        class="max-w-4xl mx-auto mb-6 px-5 py-4 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-200 flex items-start gap-3"
       >
         <svg
-          class="w-6 h-6 flex-shrink-0 text-rose-300"
+          class="w-6 h-6 flex-shrink-0 text-rose-300 mt-0.5"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -84,13 +84,18 @@
             d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
           />
         </svg>
-        <div class="flex-1">
-          <p class="font-semibold">
-            API rate limit reached ({{ rateLimitUsed }} / {{ RATE_LIMIT_RPM }} per minute)
+        <div class="flex-1 space-y-1.5">
+          <p v-if="batchLimit.isLimited.value" class="text-sm">
+            <span class="font-semibold">Process All Files</span>
+            cooldown ({{ batchLimit.used.value }} / {{ BATCH_RPM }} per minute · gemini-3.5-flash) —
+            try again in
+            <span class="font-mono font-bold text-rose-100">{{ batchLimit.label.value }}</span>.
           </p>
-          <p class="text-sm text-rose-300/80">
-            You can hit the button again in
-            <span class="font-mono font-bold text-rose-100">{{ cooldownLabel }}</span>.
+          <p v-if="individualLimit.isLimited.value" class="text-sm">
+            <span class="font-semibold">Retry / Reevaluate</span>
+            cooldown ({{ individualLimit.used.value }} / {{ INDIVIDUAL_RPM }} per minute · gemma-4-26b) —
+            try again in
+            <span class="font-mono font-bold text-rose-100">{{ individualLimit.label.value }}</span>.
           </p>
         </div>
       </div>
@@ -118,6 +123,11 @@
                   class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
                   File Name
+                </th>
+                <th
+                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
+                >
+                  Type
                 </th>
                 <th
                   class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
@@ -211,6 +221,15 @@
                     @focus="startEditing(file)"
                     class="w-full bg-transparent text-slate-300 font-medium border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
                   />
+                </td>
+                <!-- Type -->
+                <td class="px-4 py-3">
+                  <span
+                    class="inline-flex px-2.5 py-1 text-xs font-mono font-semibold rounded-md"
+                    :class="getExtensionClasses(getFileExtension(file))"
+                  >
+                    {{ getFileExtension(file) }}
+                  </span>
                 </td>
                 <!-- Status -->
                 <td class="px-4 py-3">
@@ -388,12 +407,12 @@
                         file.status === 'needs_retry' || file.status === 'error'
                       "
                       @click="retryFile(file)"
-                      :disabled="isRateLimited"
+                      :disabled="individualLimit.isLimited.value"
                       class="p-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 hover:text-cyan-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-cyan-500/20"
                       :title="
-                        isRateLimited
-                          ? `Rate limited - wait ${cooldownLabel}`
-                          : 'Retry processing'
+                        individualLimit.isLimited.value
+                          ? `Rate limited - wait ${individualLimit.label.value}`
+                          : 'Retry processing (gemma-4-26b)'
                       "
                     >
                       <svg
@@ -414,11 +433,11 @@
                     <button
                       v-if="file.status === 'done' && file.score > 0 && file.score < 3"
                       @click="reevaluateFile(file)"
-                      :disabled="isRateLimited"
+                      :disabled="individualLimit.isLimited.value"
                       class="p-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 hover:text-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-purple-500/20"
                       :title="
-                        isRateLimited
-                          ? `Rate limited - wait ${cooldownLabel}`
+                        individualLimit.isLimited.value
+                          ? `Rate limited - wait ${individualLimit.label.value}`
                           : 'Reevaluate with Gemma (low confidence score)'
                       "
                     >
@@ -492,19 +511,19 @@
             @click="processAll"
             :disabled="
               processing ||
-              isRateLimited ||
+              batchLimit.isLimited.value ||
               files.every((f) => f.status !== 'pending')
             "
             class="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold rounded-lg shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 transition-all duration-300 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-emerald-500/25"
             :title="
-              isRateLimited
-                ? `Rate limited - wait ${cooldownLabel}`
-                : 'Process all pending files'
+              batchLimit.isLimited.value
+                ? `Rate limited - wait ${batchLimit.label.value}`
+                : 'Process all pending files (gemini-3.5-flash, batches of 10)'
             "
           >
             <template v-if="processing">Processing...</template>
-            <template v-else-if="isRateLimited">
-              Cooldown · {{ cooldownLabel }}
+            <template v-else-if="batchLimit.isLimited.value">
+              Cooldown · {{ batchLimit.label.value }}
             </template>
             <template v-else>Process All Files</template>
           </button>
@@ -521,27 +540,52 @@
           >
             Clear All
           </button>
-          <!-- API usage indicator -->
+          <!-- API usage indicators -->
           <div
-            class="ml-auto flex items-center gap-4 text-slate-400 text-sm"
+            class="ml-auto flex items-center flex-wrap gap-x-5 gap-y-2 text-slate-400 text-sm"
           >
-            <div class="flex items-center gap-2" :title="`Calls made in the last 60 seconds (limit: ${RATE_LIMIT_RPM})`">
-              <span class="font-medium">API:</span>
+            <div
+              class="flex items-center gap-2"
+              :title="`Batch calls (gemini-3.5-flash) made in the last 60s (limit: ${BATCH_RPM})`"
+            >
+              <span class="font-medium">Batch:</span>
               <span
                 class="font-mono font-semibold"
                 :class="
-                  isRateLimited
+                  batchLimit.isLimited.value
                     ? 'text-rose-300'
-                    : rateLimitUsed >= RATE_LIMIT_RPM - 3
+                    : batchLimit.used.value >= BATCH_RPM - 1
                     ? 'text-amber-300'
                     : 'text-slate-300'
                 "
-                >{{ rateLimitUsed }} / {{ RATE_LIMIT_RPM }} per min</span
+                >{{ batchLimit.used.value }} / {{ BATCH_RPM }} per min</span
               >
               <span
-                v-if="isRateLimited"
+                v-if="batchLimit.isLimited.value"
                 class="px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-200 font-mono text-xs"
-                >cooldown {{ cooldownLabel }}</span
+                >{{ batchLimit.label.value }}</span
+              >
+            </div>
+            <div
+              class="flex items-center gap-2"
+              :title="`Single-file calls (gemma-4-26b) made in the last 60s (limit: ${INDIVIDUAL_RPM})`"
+            >
+              <span class="font-medium">Single:</span>
+              <span
+                class="font-mono font-semibold"
+                :class="
+                  individualLimit.isLimited.value
+                    ? 'text-rose-300'
+                    : individualLimit.used.value >= INDIVIDUAL_RPM - 3
+                    ? 'text-amber-300'
+                    : 'text-slate-300'
+                "
+                >{{ individualLimit.used.value }} / {{ INDIVIDUAL_RPM }} per min</span
+              >
+              <span
+                v-if="individualLimit.isLimited.value"
+                class="px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-200 font-mono text-xs"
+                >{{ individualLimit.label.value }}</span
               >
             </div>
             <div
@@ -622,7 +666,10 @@
             </svg>
             <h3 class="text-lg font-semibold text-slate-200 mb-2">PDF File</h3>
             <p class="text-slate-400 text-sm">{{ previewFile.name }}</p>
-            <p class="text-slate-500 text-xs mt-2">PDF preview not available</p>
+            <p class="text-slate-500 text-xs mt-2">
+              In-app preview not available, but the document will be analyzed
+              (pages are rasterized server-side, up to 5 pages).
+            </p>
           </div>
         </div>
       </div>
@@ -641,13 +688,91 @@ const MAX_FILE_SIZE_BYTES = 3 * 1024 * 1024; // 3 MB
 const MAX_FILE_SIZE_LABEL = "3MB";
 
 // --- Rate limiting (localStorage-backed, shared across tabs) --------------
-// The individual /upload endpoint uses gemma-4-26b, which is capped at
-// 15 requests per minute on the free tier. We track every API-touching
-// action (batch uploads, single retries, reevaluations) so we never exceed
-// that budget regardless of which UI button is clicked.
-const RATE_LIMIT_KEY = "rcp_api_call_timestamps";
+// We track TWO independent budgets because the two backend endpoints use
+// different models with different free-tier RPM caps:
+//   - /upload        -> gemma-4-26b      (15 RPM) - Retry / Reevaluate
+//   - /upload-batch  -> gemini-3.5-flash ( 5 RPM) - "Process All Files"
+// Each tracker keeps its own array of timestamps in localStorage, ticks down
+// once per second, and is shared across browser tabs via the storage event.
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const RATE_LIMIT_RPM = 15;
+
+const INDIVIDUAL_RPM = 15;
+const INDIVIDUAL_RATE_LIMIT_KEY = "rcp_individual_api_calls";
+
+const BATCH_RPM = 5;
+const BATCH_RATE_LIMIT_KEY = "rcp_batch_api_calls";
+
+const formatCooldown = (seconds) => {
+  if (seconds <= 0) return "";
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  return `${m}m ${rem.toString().padStart(2, "0")}s`;
+};
+
+const createRateLimitTracker = (storageKey, rpm) => {
+  const used = ref(0);
+  const cooldownSec = ref(0);
+
+  const read = () => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      const arr = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(arr)) return [];
+      const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
+      return arr
+        .filter((t) => typeof t === "number" && t > cutoff)
+        .sort((a, b) => a - b);
+    } catch {
+      return [];
+    }
+  };
+
+  const write = (timestamps) => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(timestamps));
+    } catch {
+      /* localStorage unavailable (private mode, quota) - silently ignore */
+    }
+  };
+
+  const refresh = () => {
+    const recent = read();
+    used.value = recent.length;
+    if (recent.length >= rpm) {
+      // The Nth-oldest call (where N = RPM) determines when the limit clears.
+      const targetTimestamp = recent[recent.length - rpm];
+      const expiresAt = targetTimestamp + RATE_LIMIT_WINDOW_MS;
+      cooldownSec.value = Math.max(
+        0,
+        Math.ceil((expiresAt - Date.now()) / 1000)
+      );
+    } else {
+      cooldownSec.value = 0;
+    }
+  };
+
+  const record = (count = 1) => {
+    const recent = read();
+    const now = Date.now();
+    for (let i = 0; i < count; i++) recent.push(now);
+    write(recent);
+    refresh();
+  };
+
+  const isLimited = computed(() => cooldownSec.value > 0);
+  const label = computed(() => formatCooldown(cooldownSec.value));
+
+  return { storageKey, rpm, used, cooldownSec, isLimited, label, refresh, record };
+};
+
+const individualLimit = createRateLimitTracker(
+  INDIVIDUAL_RATE_LIMIT_KEY,
+  INDIVIDUAL_RPM
+);
+const batchLimit = createRateLimitTracker(BATCH_RATE_LIMIT_KEY, BATCH_RPM);
 
 const fileInput = ref(null);
 const files = ref([]);
@@ -655,73 +780,16 @@ const processing = ref(false);
 const previewFile = ref(null);
 const previewUrl = ref(null);
 const totalProcessingTime = ref(0);
-const rateLimitUsed = ref(0);
-const cooldownRemainingSec = ref(0);
 let fileIdCounter = 0;
 let rateLimitTimer = null;
 
-const readTimestamps = () => {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(RATE_LIMIT_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(arr)) return [];
-    const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
-    return arr
-      .filter((t) => typeof t === "number" && t > cutoff)
-      .sort((a, b) => a - b);
-  } catch {
-    return [];
-  }
-};
-
-const writeTimestamps = (timestamps) => {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(RATE_LIMIT_KEY, JSON.stringify(timestamps));
-  } catch {
-    /* localStorage unavailable (private mode, quota) - silently ignore */
-  }
-};
-
-const refreshRateLimitState = () => {
-  const recent = readTimestamps();
-  rateLimitUsed.value = recent.length;
-  if (recent.length >= RATE_LIMIT_RPM) {
-    // The Nth-oldest call (where N = RPM) determines when the limit clears.
-    const targetTimestamp = recent[recent.length - RATE_LIMIT_RPM];
-    const expiresAt = targetTimestamp + RATE_LIMIT_WINDOW_MS;
-    cooldownRemainingSec.value = Math.max(
-      0,
-      Math.ceil((expiresAt - Date.now()) / 1000)
-    );
-  } else {
-    cooldownRemainingSec.value = 0;
-  }
-};
-
-const recordApiCalls = (count = 1) => {
-  const recent = readTimestamps();
-  const now = Date.now();
-  for (let i = 0; i < count; i++) recent.push(now);
-  writeTimestamps(recent);
-  refreshRateLimitState();
-};
-
-const isRateLimited = computed(() => cooldownRemainingSec.value > 0);
-
-const cooldownLabel = computed(() => {
-  const s = cooldownRemainingSec.value;
-  if (s <= 0) return "";
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  return `${m}m ${rem.toString().padStart(2, "0")}s`;
-});
-
 onMounted(() => {
-  refreshRateLimitState();
-  rateLimitTimer = setInterval(refreshRateLimitState, 1000);
+  individualLimit.refresh();
+  batchLimit.refresh();
+  rateLimitTimer = setInterval(() => {
+    individualLimit.refresh();
+    batchLimit.refresh();
+  }, 1000);
   if (typeof window !== "undefined") {
     window.addEventListener("storage", onRateLimitStorage);
   }
@@ -734,9 +802,10 @@ onBeforeUnmount(() => {
   }
 });
 
-// Refresh immediately if another tab updates the shared counter.
+// Refresh immediately if another tab updates either shared counter.
 const onRateLimitStorage = (event) => {
-  if (event.key === RATE_LIMIT_KEY) refreshRateLimitState();
+  if (event.key === INDIVIDUAL_RATE_LIMIT_KEY) individualLimit.refresh();
+  if (event.key === BATCH_RATE_LIMIT_KEY) batchLimit.refresh();
 };
 
 const handleFileSelect = (event) => {
@@ -880,10 +949,11 @@ const applyExtractedData = (fileItem, data) => {
 // localStorage rate limit and hit the individual /upload endpoint which is
 // configured to use the gemma-4-26b model on the backend.
 const runSingleFileEvaluation = async (fileItem) => {
-  if (isRateLimited.value) {
+  if (individualLimit.isLimited.value) {
     alert(
-      `Rate limit reached (${RATE_LIMIT_RPM} requests / minute). ` +
-        `Try again in ${cooldownLabel.value}.`
+      `Individual evaluation rate limit reached ` +
+        `(${INDIVIDUAL_RPM} requests / minute). ` +
+        `Try again in ${individualLimit.label.value}.`
     );
     return;
   }
@@ -891,7 +961,7 @@ const runSingleFileEvaluation = async (fileItem) => {
   const previousStatus = fileItem.status;
   fileItem.status = "retrying";
   const startTime = performance.now();
-  recordApiCalls(1);
+  individualLimit.record(1);
 
   try {
     const formData = new FormData();
@@ -926,6 +996,29 @@ const reevaluateFile = (fileItem) => runSingleFileEvaluation(fileItem);
 
 const isImageFile = (file) => {
   return file.file.type.startsWith("image/");
+};
+
+// Returns the upper-case file extension (without the dot) for a fileItem, e.g.
+// "image.PNG" -> "PNG", "doc.pdf" -> "PDF". Falls back to "FILE" if missing.
+const getFileExtension = (fileItem) => {
+  const name = fileItem?.name || "";
+  const idx = name.lastIndexOf(".");
+  if (idx === -1 || idx === name.length - 1) return "FILE";
+  return name.slice(idx + 1).toUpperCase();
+};
+
+const getExtensionClasses = (ext) => {
+  switch (ext) {
+    case "PDF":
+      return "bg-red-500/20 text-red-300";
+    case "PNG":
+      return "bg-blue-500/20 text-blue-300";
+    case "JPG":
+    case "JPEG":
+      return "bg-emerald-500/20 text-emerald-300";
+    default:
+      return "bg-slate-600/40 text-slate-300";
+  }
 };
 
 const openPreview = (file) => {
@@ -995,14 +1088,15 @@ const processAll = async () => {
 
   const pendingFiles = files.value.filter((f) => f.status === "pending");
   // Each batch is sent as ONE multipart request to /upload-batch, which forwards
-  // all 10 images to the model in a SINGLE generate_content call. We still
-  // count each batch as 1 against the per-minute API budget, and stop early if
-  // the budget would be exceeded so the user can resume after the cooldown.
+  // all 10 images to gemini-3.5-flash in a SINGLE generate_content call.
+  // gemini-3.5-flash is capped at 5 RPM on the free tier, so we track each
+  // batch as 1 against the batchLimit bucket and stop early if the budget
+  // would be exceeded; the user can resume after the cooldown timer hits zero.
   const BATCH_SIZE = 10;
   let stoppedForCooldown = false;
 
   for (let i = 0; i < pendingFiles.length; i += BATCH_SIZE) {
-    if (isRateLimited.value) {
+    if (batchLimit.isLimited.value) {
       stoppedForCooldown = true;
       break;
     }
@@ -1014,7 +1108,7 @@ const processAll = async () => {
     });
 
     const batchStart = performance.now();
-    recordApiCalls(1);
+    batchLimit.record(1);
 
     try {
       const formData = new FormData();
@@ -1077,10 +1171,10 @@ const processAll = async () => {
 
   if (stoppedForCooldown) {
     // Files we never reached are still "pending" - the user can click
-    // "Process All Files" again once the cooldown timer hits zero.
+    // "Process All Files" again once the batch cooldown timer hits zero.
     console.info(
-      `Process stopped early: rate limit reached. ` +
-        `Resume in ${cooldownLabel.value}.`
+      `Process All stopped early: batch rate limit reached. ` +
+        `Resume in ${batchLimit.label.value}.`
     );
   }
 };

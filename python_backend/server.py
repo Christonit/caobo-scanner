@@ -74,11 +74,12 @@ gemini_semaphore = asyncio.Semaphore(GEMINI_MAX_CONCURRENT)
 # - INDIVIDUAL calls (single-file /upload, retry, reevaluate) use gemma-4-26b
 #   (15 RPM on the free tier) so the UI can comfortably allow up to ~15 manual
 #   actions per minute.
-# - BATCH calls (/upload-batch) keep gemma-3-12b-it because the per-batch payload
-#   includes many images at once and the older model has been validated for
-#   that prompt shape.
+# - BATCH calls (/upload-batch, used by "Process All Files") use gemini-3.5-flash
+#   which handles many images per generate_content call well. NOTE: it is
+#   capped at 5 RPM on the free tier, so the frontend tracks batch requests
+#   in its own localStorage bucket and disables the button after 5 calls/min.
 INDIVIDUAL_MODEL = "gemma-4-26b"
-BATCH_MODEL = "gemma-3-12b-it"
+BATCH_MODEL = "gemini-3.5-flash"
 
 
 def calculate_file_hash(file_content: bytes) -> str:
@@ -282,40 +283,138 @@ def _is_retryable_error(error: Exception) -> bool:
     )
 
 
-def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3) -> dict:
+# Maximum number of pages to render from a single PDF. Receipts are almost
+# always 1-2 pages; the cap keeps payloads small and within model context.
+PDF_MAX_PAGES = 5
+# Rasterization DPI for PDF pages. ~150 DPI is a good balance between OCR
+# quality and payload size for invoice text.
+PDF_RENDER_DPI = 150
+
+
+def render_pdf_to_images(pdf_bytes: bytes, max_pages: int = PDF_MAX_PAGES) -> list:
     """
-    Process file with Gemini AI using gemini-2.5-flash model
-    Extracts receipt/invoice data according to Dominican Republic accounting standards
-    Includes retry logic for rate limiting and transient errors
+    Render a PDF byte buffer to a list of PIL.Image pages.
+
+    Uses PyMuPDF (imports as `pymupdf` on recent versions, `fitz` historically).
+    Returns at most `max_pages` images. Returns an empty list if PyMuPDF is
+    unavailable or the PDF can't be opened.
     """
     import io
+    from PIL import Image
+
+    try:
+        try:
+            import pymupdf  # PyMuPDF >= 1.24
+        except ImportError:  # pragma: no cover - older PyMuPDF
+            import fitz as pymupdf  # type: ignore
+
+        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as e:
+        print(f"[ERROR] Could not open PDF: {e}")
+        return []
+
+    images: list = []
+    try:
+        page_count = min(doc.page_count, max_pages)
+        zoom = PDF_RENDER_DPI / 72.0  # 72 is PDF's base DPI
+        matrix = pymupdf.Matrix(zoom, zoom)
+        for page_index in range(page_count):
+            page = doc.load_page(page_index)
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            images.append(img)
+    except Exception as e:
+        print(f"[ERROR] Failed while rasterizing PDF: {e}")
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
+
+    return images
+
+
+def load_file_as_images(file_content: bytes, filename: str) -> list:
+    """
+    Load a single uploaded file into a list of PIL.Image objects ready for
+    a vision model.
+
+    - PNG / JPG / JPEG -> single-element list with the decoded image
+    - PDF              -> one image per rendered page (capped at PDF_MAX_PAGES)
+    - Anything else    -> empty list (caller treats as unsupported)
+    """
+    import io
+    from PIL import Image
+
+    ext = Path(filename).suffix.lower() if filename else ""
+    if ext in (".png", ".jpg", ".jpeg"):
+        try:
+            return [Image.open(io.BytesIO(file_content))]
+        except Exception as e:
+            print(f"[ERROR] Failed to open image {filename}: {e}")
+            return []
+    if ext == ".pdf":
+        return render_pdf_to_images(file_content)
+    return []
+
+
+def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3) -> dict:
+    """
+    Process a single file (image or PDF) with the individual Gemma model.
+    Extracts receipt/invoice data according to Dominican Republic accounting
+    standards. PDFs are rasterized to images first so vision-only models
+    (Gemma) can process them. Includes retry logic for rate limiting and
+    transient errors.
+    """
     import time
     import re
-    from PIL import Image
 
     # Check if API key is configured
     if not GEMINI_API_KEY:
         print(f"[ERROR] Cannot process {filename}: GEMINI_API_KEY not configured")
         return _empty_extracted(filename, descripcion="ERROR: API key not configured")
 
+    file_extension = Path(filename).suffix.lower() if filename else ""
+    if file_extension not in (".png", ".jpg", ".jpeg", ".pdf"):
+        print(f"[ERROR] Unsupported file type: {file_extension}")
+        return _empty_extracted(
+            filename, descripcion=f"Unsupported file type: {file_extension}"
+        )
+
+    page_images = load_file_as_images(file_content, filename)
+    if not page_images:
+        return _empty_extracted(
+            filename,
+            descripcion=(
+                "Could not render PDF pages"
+                if file_extension == ".pdf"
+                else "Could not open image"
+            ),
+        )
+
+    if file_extension == ".pdf" and len(page_images) > 1:
+        prompt = (
+            f"{SYSTEM_PROMPT}\n\n"
+            f"NOTA: Te envio {len(page_images)} paginas de un mismo recibo/"
+            f"factura en PDF. Trata las paginas como un solo documento y "
+            f"retorna SOLO un objeto JSON valido sin texto adicional, sin "
+            f"markdown, sin explicaciones."
+        )
+    else:
+        prompt = (
+            f"{SYSTEM_PROMPT}\n\nExtrae la informacion del recibo/factura en "
+            f"la imagen y retorna SOLO un objeto JSON valido sin texto "
+            f"adicional, sin markdown, sin explicaciones."
+        )
+
     last_error = None
 
     for attempt in range(max_retries):
         try:
             model = genai.GenerativeModel(INDIVIDUAL_MODEL)
-            file_extension = Path(filename).suffix.lower() if filename else ''
+            response = model.generate_content([prompt, *page_images])
 
-            if file_extension in ['.png', '.jpg', '.jpeg']:
-                image = Image.open(io.BytesIO(file_content))
-                prompt = f"{SYSTEM_PROMPT}\n\nExtrae la informacion del recibo/factura en la imagen y retorna SOLO un objeto JSON valido sin texto adicional, sin markdown, sin explicaciones."
-                response = model.generate_content([prompt, image])
-
-            elif file_extension == '.pdf':
-                raise ValueError("PDF processing requires additional setup. Please convert PDF to image first.")
-            else:
-                raise ValueError(f"Unsupported file type: {file_extension}")
-
-            if not response or not hasattr(response, 'text') or not response.text:
+            if not response or not hasattr(response, "text") or not response.text:
                 raise ValueError("Empty response from Gemini API")
 
             response_text = _strip_markdown_fences(response.text)
@@ -323,11 +422,13 @@ def process_with_gemini(file_content: bytes, filename: str, max_retries: int = 3
             try:
                 extracted_data = json.loads(response_text)
             except json.JSONDecodeError:
-                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL)
+                json_match = re.search(
+                    r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL
+                )
                 if json_match:
                     extracted_data = json.loads(json_match.group())
                 else:
-                    raise ValueError(f"Could not parse JSON from response")
+                    raise ValueError("Could not parse JSON from response")
 
             return _normalize_extracted(extracted_data, filename)
 
@@ -347,17 +448,19 @@ def process_batch_with_gemini(
     max_retries: int = 3,
 ) -> List[dict]:
     """
-    Process MULTIPLE image files with Gemini AI in a SINGLE API call.
+    Process MULTIPLE files (images and/or PDFs) with the batch Gemini model in
+    a SINGLE API call.
 
-    files: list of (file_content, filename) tuples (only image types: png/jpg/jpeg).
-    Returns a list of normalized extracted-data dicts in the same order as input.
-    Falls back to per-file processing if the batch call cannot be parsed back into
-    the expected number of items.
+    files: list of (file_content, filename) tuples. Supports png/jpg/jpeg and
+    pdf - PDFs are rasterized to images on the fly. Each file becomes ONE entry
+    in the result list, even if its PDF spans multiple pages.
+
+    Returns a list of normalized extracted-data dicts in the same order as
+    input. Falls back to per-file processing if the batch call cannot be parsed
+    back into the expected number of items.
     """
-    import io
     import time
     import re
-    from PIL import Image
 
     if not files:
         return []
@@ -367,21 +470,29 @@ def process_batch_with_gemini(
         return [_empty_extracted(fn, descripcion="ERROR: API key not configured")
                 for _, fn in files]
 
-    # Open all images up front so we can fail fast on corrupt ones.
-    images: List[Optional["Image.Image"]] = []
+    # Render each file to its page-image list up front so we can fail fast on
+    # unreadable files and so the per-document prompt knows the page counts.
+    per_file_images: List[list] = []
     for content, filename in files:
-        try:
-            images.append(Image.open(io.BytesIO(content)))
-        except Exception as e:
-            print(f"[ERROR] Failed to open image {filename}: {e}")
-            images.append(None)
+        per_file_images.append(load_file_as_images(content, filename))
+
+    # Describe each document in the batch (filename + page count) so the model
+    # understands when several images belong to the same multi-page PDF.
+    doc_summary_lines = []
+    for i, ((_, filename), pages) in enumerate(zip(files, per_file_images), start=1):
+        doc_summary_lines.append(
+            f"  - Documento #{i}: {filename} ({len(pages)} pagina(s))"
+        )
 
     batch_prompt = (
         f"{SYSTEM_PROMPT}\n\n"
         f"IMPORTANTE - Procesamiento por lotes: Te voy a enviar {len(files)} "
-        f"imagenes de recibos/facturas numeradas en orden. Debes procesar CADA "
-        f"imagen y retornar un ARRAY JSON con EXACTAMENTE {len(files)} elementos, "
-        f"uno por cada imagen, en el MISMO ORDEN en que se envian.\n\n"
+        f"documentos de recibos/facturas. Algunos pueden ser PDFs con varias "
+        f"paginas; trata cada documento como UNA unidad y retorna UN solo "
+        f"objeto JSON por documento.\n\n"
+        f"Documentos en este lote:\n" + "\n".join(doc_summary_lines) + "\n\n"
+        f"Debes retornar un ARRAY JSON con EXACTAMENTE {len(files)} elementos, "
+        f"uno por cada documento, en el MISMO ORDEN en que se envian.\n\n"
         f"Cada elemento del array debe ser un objeto JSON con las claves: "
         f"documento, ncf, tipo_de_suplidor, tipo_de_gasto, descripcion, fecha, "
         f"monto_en_bienes, itbis, selectivo, metodo_de_pago, score.\n\n"
@@ -395,12 +506,22 @@ def process_batch_with_gemini(
         try:
             model = genai.GenerativeModel(BATCH_MODEL)
 
-            # Interleave labels + images so Gemini knows which image is which.
+            # Build the content list: prompt + per-document blocks. Each
+            # document gets a header followed by ALL its page images.
             content_parts: list = [batch_prompt]
-            for i, ((_, filename), image) in enumerate(zip(files, images), start=1):
-                content_parts.append(f"\n--- Imagen #{i} ({filename}) ---")
-                if image is not None:
-                    content_parts.append(image)
+            for i, ((_, filename), pages) in enumerate(
+                zip(files, per_file_images), start=1
+            ):
+                content_parts.append(
+                    f"\n--- Documento #{i}: {filename} "
+                    f"({len(pages)} pagina(s)) ---"
+                )
+                for page_idx, page_image in enumerate(pages, start=1):
+                    if len(pages) > 1:
+                        content_parts.append(
+                            f"Pagina {page_idx} de {len(pages)}:"
+                        )
+                    content_parts.append(page_image)
 
             response = model.generate_content(content_parts)
 
@@ -590,8 +711,9 @@ async def upload_batch(files: List[UploadFile] = File(...)):
     """
     Upload and process MULTIPLE receipt/invoice files in a SINGLE Gemini API call.
 
-    Accepts up to ~10 image files (PNG/JPG/JPEG). PDFs are not supported in batch mode
-    and will be returned with status="error" in the per-file results.
+    Accepts up to ~10 files. Supported formats: PNG / JPG / JPEG / PDF. PDFs are
+    rasterized to images (one image per page, capped at PDF_MAX_PAGES) and all
+    pages of a PDF are still represented as ONE entry in the response.
 
     Returns:
         {
@@ -608,7 +730,6 @@ async def upload_batch(files: List[UploadFile] = File(...)):
         raise HTTPException(status_code=400, detail="No files provided")
 
     allowed_extensions = {'.pdf', '.png', '.jpg', '.jpeg'}
-    image_extensions = {'.png', '.jpg', '.jpeg'}
 
     # Read each upload and classify it. Pending entries will be sent to Gemini.
     entries: list = []
@@ -631,14 +752,6 @@ async def upload_batch(files: List[UploadFile] = File(...)):
                 "filename": filename,
                 "status": "error",
                 "message": f"Failed to read upload: {e}",
-            })
-            continue
-
-        if ext not in image_extensions:
-            entries.append({
-                "filename": filename,
-                "status": "error",
-                "message": "PDF processing is not supported in batch mode",
             })
             continue
 

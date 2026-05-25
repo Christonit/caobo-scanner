@@ -2,7 +2,10 @@
   <div
     class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900"
   >
-    <div class="px-6 py-12" :class="{ 'mr-[400px]': previewFile }">
+    <div
+      class="px-6 py-12 transition-[margin] duration-200"
+      :style="previewFile ? { marginRight: `${previewWidth}px` } : null"
+    >
       <!-- Header -->
       <header class="mb-12 max-w-7xl mx-auto">
         <h1
@@ -60,7 +63,36 @@
               </button>
             </div>
             <p class="text-sm text-slate-500">
-              Supports: PDF, PNG, JPG, JPEG · Max {{ MAX_FILE_SIZE_LABEL }} per file
+              Supports: PDF, PNG, JPG, JPEG · Max {{ MAX_FILE_SIZE_LABEL }} per
+              file · PDFs are split into one row per page
+            </p>
+            <p
+              v-if="splittingPdfs > 0"
+              class="text-sm text-cyan-300 flex items-center justify-center gap-2"
+            >
+              <svg
+                class="animate-spin w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke-width="3"
+                  stroke-opacity="0.25"
+                />
+                <path
+                  stroke-linecap="round"
+                  stroke-width="3"
+                  d="M22 12a10 10 0 00-10-10"
+                />
+              </svg>
+              Splitting {{ splittingPdfs }} PDF{{
+                splittingPdfs === 1 ? "" : "s"
+              }}
+              into pages...
             </p>
           </div>
         </div>
@@ -87,15 +119,21 @@
         <div class="flex-1 space-y-1.5">
           <p v-if="batchLimit.isLimited.value" class="text-sm">
             <span class="font-semibold">Process All Files</span>
-            cooldown ({{ batchLimit.used.value }} / {{ BATCH_RPM }} per minute · gemini-3.5-flash) —
-            try again in
-            <span class="font-mono font-bold text-rose-100">{{ batchLimit.label.value }}</span>.
+            cooldown ({{ batchLimit.used.value }} / {{ BATCH_RPM }} per minute ·
+            gemini-3.5-flash) — try again in
+            <span class="font-mono font-bold text-rose-100">{{
+              batchLimit.label.value
+            }}</span
+            >.
           </p>
           <p v-if="individualLimit.isLimited.value" class="text-sm">
             <span class="font-semibold">Retry / Reevaluate</span>
-            cooldown ({{ individualLimit.used.value }} / {{ INDIVIDUAL_RPM }} per minute · gemma-4-26b) —
-            try again in
-            <span class="font-mono font-bold text-rose-100">{{ individualLimit.label.value }}</span>.
+            cooldown ({{ individualLimit.used.value }} /
+            {{ INDIVIDUAL_RPM }} per minute · gemma-4-26b) — try again in
+            <span class="font-mono font-bold text-rose-100">{{
+              individualLimit.label.value
+            }}</span
+            >.
           </p>
         </div>
       </div>
@@ -431,7 +469,11 @@
                     </button>
                     <!-- Reevaluate Button (visible for done files with low score: 1 or 2) -->
                     <button
-                      v-if="file.status === 'done' && file.score > 0 && file.score < 3"
+                      v-if="
+                        file.status === 'done' &&
+                        file.score > 0 &&
+                        file.score < 3
+                      "
                       @click="reevaluateFile(file)"
                       :disabled="individualLimit.isLimited.value"
                       class="p-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 hover:text-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-purple-500/20"
@@ -555,8 +597,8 @@
                   batchLimit.isLimited.value
                     ? 'text-rose-300'
                     : batchLimit.used.value >= BATCH_RPM - 1
-                    ? 'text-amber-300'
-                    : 'text-slate-300'
+                      ? 'text-amber-300'
+                      : 'text-slate-300'
                 "
                 >{{ batchLimit.used.value }} / {{ BATCH_RPM }} per min</span
               >
@@ -577,10 +619,11 @@
                   individualLimit.isLimited.value
                     ? 'text-rose-300'
                     : individualLimit.used.value >= INDIVIDUAL_RPM - 3
-                    ? 'text-amber-300'
-                    : 'text-slate-300'
+                      ? 'text-amber-300'
+                      : 'text-slate-300'
                 "
-                >{{ individualLimit.used.value }} / {{ INDIVIDUAL_RPM }} per min</span
+                >{{ individualLimit.used.value }} / {{ INDIVIDUAL_RPM }} per
+                min</span
               >
               <span
                 v-if="individualLimit.isLimited.value"
@@ -588,10 +631,7 @@
                 >{{ individualLimit.label.value }}</span
               >
             </div>
-            <div
-              v-if="totalProcessingTime > 0"
-              class="flex items-center gap-2"
-            >
+            <div v-if="totalProcessingTime > 0" class="flex items-center gap-2">
               <span class="font-medium">Total Elapsed Time:</span>
               <span class="text-slate-300 font-mono font-semibold">{{
                 formatTime(totalProcessingTime)
@@ -606,8 +646,24 @@
     <Transition name="slide">
       <div
         v-if="previewFile"
-        class="fixed right-0 top-0 h-full w-[400px] bg-slate-800 border-l border-slate-700 shadow-2xl z-40 flex flex-col"
+        class="fixed right-0 top-0 h-full bg-slate-800 border-l border-slate-700 shadow-2xl z-40 flex flex-col"
+        :style="{ width: `${previewWidth}px` }"
       >
+        <!-- Resize handle (drag to change preview width) -->
+        <div
+          class="absolute left-0 top-0 h-full w-1.5 -translate-x-1/2 cursor-col-resize group z-50"
+          @mousedown="startPreviewResize"
+          :title="`Drag to resize · ${previewWidth}px`"
+        >
+          <div
+            class="h-full w-full transition-colors"
+            :class="
+              isResizingPreview
+                ? 'bg-emerald-400/70'
+                : 'bg-transparent group-hover:bg-emerald-400/40'
+            "
+          ></div>
+        </div>
         <!-- Header -->
         <div
           class="px-4 py-4 border-b border-slate-700 flex items-center justify-between"
@@ -649,27 +705,29 @@
             />
           </div>
 
-          <!-- PDF Notice -->
-          <div v-else class="bg-slate-900 rounded-xl p-8 text-center">
-            <svg
-              class="w-16 h-16 mx-auto text-red-400 mb-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          <!-- PDF Preview (iframe with blob URL) -->
+          <div
+            v-else-if="isPdfFile(previewFile)"
+            class="bg-slate-900 rounded-xl overflow-hidden h-full flex flex-col"
+          >
+            <iframe
+              :src="previewUrl"
+              :title="previewFile.name"
+              class="w-full flex-1 bg-white"
+              style="min-height: 70vh"
+            ></iframe>
+            <p
+              class="px-3 py-2 text-xs text-slate-500 border-t border-slate-700"
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.5"
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-            <h3 class="text-lg font-semibold text-slate-200 mb-2">PDF File</h3>
-            <p class="text-slate-400 text-sm">{{ previewFile.name }}</p>
-            <p class="text-slate-500 text-xs mt-2">
-              In-app preview not available, but the document will be analyzed
-              (pages are rasterized server-side, up to 5 pages).
+              PDFs are normally split into one row per page on upload. This file
+              kept as-is - the backend will rasterize up to 5 pages.
             </p>
+          </div>
+
+          <!-- Fallback for unknown types -->
+          <div v-else class="bg-slate-900 rounded-xl p-8 text-center">
+            <p class="text-slate-400 text-sm">{{ previewFile.name }}</p>
+            <p class="text-slate-500 text-xs mt-2">No preview available.</p>
           </div>
         </div>
       </div>
@@ -678,14 +736,100 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
 
 const config = useRuntimeConfig();
 const API_BASE = config.public.apiBase;
 
 // --- Upload limits --------------------------------------------------------
-const MAX_FILE_SIZE_BYTES = 3 * 1024 * 1024; // 3 MB
-const MAX_FILE_SIZE_LABEL = "3MB";
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 3 MB
+const MAX_FILE_SIZE_LABEL = "10MB";
+
+// --- PDF rendering (client-side splitting) --------------------------------
+// PDFs are split into one PNG image per page on upload so each page becomes
+// its own row in the table and flows through the existing image pipeline.
+const PDF_RENDER_SCALE = 2.0; // ~144 DPI - good for OCR, reasonable file size
+let pdfjsLibPromise = null;
+
+const loadPdfJs = async () => {
+  if (typeof window === "undefined") return null;
+  if (!pdfjsLibPromise) {
+    pdfjsLibPromise = (async () => {
+      const pdfjs = await import("pdfjs-dist");
+      // pdfjs-dist v4+ ships an .mjs worker. Use the bundled URL so it works
+      // with Vite/Nuxt without manual asset copying.
+      const workerUrl = (
+        await import("pdfjs-dist/build/pdf.worker.min.mjs?url")
+      ).default;
+      pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+      return pdfjs;
+    })().catch((err) => {
+      console.error("Failed to load pdfjs-dist:", err);
+      pdfjsLibPromise = null;
+      throw err;
+    });
+  }
+  return pdfjsLibPromise;
+};
+
+// Convert a single PDF File into an array of per-page PNG Files. Throws on
+// failure so the caller can decide to fall back to uploading the PDF as-is.
+const splitPdfIntoPageFiles = async (pdfFile) => {
+  const pdfjs = await loadPdfJs();
+  if (!pdfjs) throw new Error("pdfjs-dist unavailable in this environment");
+
+  const arrayBuffer = await pdfFile.arrayBuffer();
+  const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
+  const pdf = await loadingTask.promise;
+
+  const baseName = pdfFile.name.replace(/\.pdf$/i, "");
+  const pageFiles = [];
+  const padWidth = String(pdf.numPages).length;
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const viewport = page.getViewport({ scale: PDF_RENDER_SCALE });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas 2D context unavailable");
+
+    await page.render({ canvasContext: context, viewport, canvas }).promise;
+
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error("toBlob failed"))),
+        "image/png",
+      );
+    });
+
+    const paddedPage = String(pageNum).padStart(padWidth, "0");
+    const totalPages = String(pdf.numPages).padStart(padWidth, "0");
+    const pageName = `${baseName} - Page ${paddedPage} of ${totalPages}.png`;
+    pageFiles.push(
+      new File([blob], pageName, {
+        type: "image/png",
+        lastModified: pdfFile.lastModified,
+      }),
+    );
+
+    // Free per-page resources promptly.
+    canvas.width = 0;
+    canvas.height = 0;
+    if (typeof page.cleanup === "function") page.cleanup();
+  }
+
+  try {
+    pdf.cleanup();
+    pdf.destroy();
+  } catch {
+    /* ignore - cleanup is best-effort */
+  }
+
+  return pageFiles;
+};
 
 // --- Rate limiting (localStorage-backed, shared across tabs) --------------
 // We track TWO independent budgets because the two backend endpoints use
@@ -747,7 +891,7 @@ const createRateLimitTracker = (storageKey, rpm) => {
       const expiresAt = targetTimestamp + RATE_LIMIT_WINDOW_MS;
       cooldownSec.value = Math.max(
         0,
-        Math.ceil((expiresAt - Date.now()) / 1000)
+        Math.ceil((expiresAt - Date.now()) / 1000),
       );
     } else {
       cooldownSec.value = 0;
@@ -765,12 +909,21 @@ const createRateLimitTracker = (storageKey, rpm) => {
   const isLimited = computed(() => cooldownSec.value > 0);
   const label = computed(() => formatCooldown(cooldownSec.value));
 
-  return { storageKey, rpm, used, cooldownSec, isLimited, label, refresh, record };
+  return {
+    storageKey,
+    rpm,
+    used,
+    cooldownSec,
+    isLimited,
+    label,
+    refresh,
+    record,
+  };
 };
 
 const individualLimit = createRateLimitTracker(
   INDIVIDUAL_RATE_LIMIT_KEY,
-  INDIVIDUAL_RPM
+  INDIVIDUAL_RPM,
 );
 const batchLimit = createRateLimitTracker(BATCH_RATE_LIMIT_KEY, BATCH_RPM);
 
@@ -792,6 +945,18 @@ onMounted(() => {
   }, 1000);
   if (typeof window !== "undefined") {
     window.addEventListener("storage", onRateLimitStorage);
+    window.addEventListener("resize", onWindowResize);
+    try {
+      const stored = window.localStorage.getItem(PREVIEW_WIDTH_KEY);
+      const parsed = stored ? parseInt(stored, 10) : NaN;
+      if (Number.isFinite(parsed)) {
+        previewWidth.value = clampPreviewWidth(parsed);
+      } else {
+        previewWidth.value = clampPreviewWidth(PREVIEW_DEFAULT_WIDTH);
+      }
+    } catch {
+      previewWidth.value = PREVIEW_DEFAULT_WIDTH;
+    }
   }
 });
 
@@ -799,6 +964,8 @@ onBeforeUnmount(() => {
   if (rateLimitTimer) clearInterval(rateLimitTimer);
   if (typeof window !== "undefined") {
     window.removeEventListener("storage", onRateLimitStorage);
+    window.removeEventListener("resize", onWindowResize);
+    window.removeEventListener("mousemove", onPreviewResizeMove);
   }
 });
 
@@ -808,64 +975,152 @@ const onRateLimitStorage = (event) => {
   if (event.key === BATCH_RATE_LIMIT_KEY) batchLimit.refresh();
 };
 
-const handleFileSelect = (event) => {
+const handleFileSelect = async (event) => {
   const selectedFiles = Array.from(event.target.files);
-  addFiles(selectedFiles);
+  await addFiles(selectedFiles);
   event.target.value = "";
 };
 
-const handleDrop = (event) => {
+const handleDrop = async (event) => {
   event.preventDefault();
   const droppedFiles = Array.from(event.dataTransfer.files);
-  addFiles(droppedFiles);
+  await addFiles(droppedFiles);
 };
 
-const addFiles = (fileList) => {
-  fileList.forEach((file) => {
-    const validTypes = [
-      "application/pdf",
-      "image/png",
-      "image/jpeg",
-      "image/jpg",
-    ];
+const createFileItem = (file) => ({
+  id: fileIdCounter++,
+  name: file.name,
+  file: file,
+  status: "pending",
+  data: null,
+  originalData: null,
+  editableData: {
+    filename: file.name,
+    documento: "",
+    ncf: "",
+    tipo_de_suplidor: "",
+    tipo_de_gasto: "",
+    descripcion: "",
+    fecha: "",
+    monto_en_bienes: "",
+    itbis: "",
+    selectivo: "",
+    metodo_de_pago: "",
+  },
+  score: 0,
+  processingTime: null,
+});
+
+// Tracks PDFs currently being rasterized so the user sees feedback.
+const splittingPdfs = ref(0);
+
+// --- Resizable preview side panel ----------------------------------------
+const PREVIEW_WIDTH_KEY = "rcp_preview_panel_width";
+const PREVIEW_MIN_WIDTH = 320;
+const PREVIEW_MAX_WIDTH_FRACTION = 0.75; // never wider than 75% of viewport
+const PREVIEW_DEFAULT_WIDTH = 480;
+
+const previewWidth = ref(PREVIEW_DEFAULT_WIDTH);
+const isResizingPreview = ref(false);
+
+const clampPreviewWidth = (w) => {
+  const maxAllowed =
+    typeof window === "undefined"
+      ? 1200
+      : Math.max(
+          PREVIEW_MIN_WIDTH,
+          Math.floor(window.innerWidth * PREVIEW_MAX_WIDTH_FRACTION),
+        );
+  return Math.min(Math.max(w, PREVIEW_MIN_WIDTH), maxAllowed);
+};
+
+const startPreviewResize = (event) => {
+  if (typeof window === "undefined") return;
+  event.preventDefault();
+  isResizingPreview.value = true;
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+  window.addEventListener("mousemove", onPreviewResizeMove);
+  window.addEventListener("mouseup", stopPreviewResize, { once: true });
+};
+
+const onPreviewResizeMove = (event) => {
+  if (!isResizingPreview.value || typeof window === "undefined") return;
+  // The panel is anchored to the right edge; its width is the distance from
+  // the cursor to the right edge of the viewport.
+  const newWidth = clampPreviewWidth(window.innerWidth - event.clientX);
+  previewWidth.value = newWidth;
+};
+
+const stopPreviewResize = () => {
+  if (!isResizingPreview.value) return;
+  isResizingPreview.value = false;
+  if (typeof window !== "undefined") {
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    window.removeEventListener("mousemove", onPreviewResizeMove);
+    try {
+      window.localStorage.setItem(
+        PREVIEW_WIDTH_KEY,
+        String(previewWidth.value),
+      );
+    } catch {
+      /* localStorage unavailable - silently ignore */
+    }
+  }
+};
+
+const onWindowResize = () => {
+  previewWidth.value = clampPreviewWidth(previewWidth.value);
+};
+
+const addFiles = async (fileList) => {
+  const validTypes = [
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+  ];
+
+  for (const file of fileList) {
     if (!validTypes.includes(file.type)) {
       alert(`${file.name} is not a supported file type`);
-      return;
+      continue;
     }
 
+    // The 3MB cap applies to the original upload. After PDF rasterization
+    // the per-page PNGs may be larger, but they never leave the browser as
+    // a single payload bigger than this.
     if (file.size > MAX_FILE_SIZE_BYTES) {
       const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
       alert(
-        `${file.name} is ${sizeMb}MB which exceeds the ${MAX_FILE_SIZE_LABEL} per-file limit.`
+        `${file.name} is ${sizeMb}MB which exceeds the ${MAX_FILE_SIZE_LABEL} per-file limit.`,
       );
-      return;
+      continue;
     }
 
-    const fileItem = {
-      id: fileIdCounter++,
-      name: file.name,
-      file: file,
-      status: "pending",
-      data: null,
-      originalData: null,
-      editableData: {
-        filename: file.name,
-        documento: "",
-        ncf: "",
-        tipo_de_suplidor: "",
-        tipo_de_gasto: "",
-        descripcion: "",
-        fecha: "",
-        monto_en_bienes: "",
-        itbis: "",
-        selectivo: "",
-        metodo_de_pago: "",
-      },
-      score: 0,
-      processingTime: null,
-    };
-    files.value.push(fileItem);
-  });
+    if (file.type === "application/pdf") {
+      splittingPdfs.value++;
+      try {
+        const pages = await splitPdfIntoPageFiles(file);
+        if (!pages.length) {
+          throw new Error("PDF produced 0 pages");
+        }
+        pages.forEach((pageFile) => files.value.push(createFileItem(pageFile)));
+      } catch (err) {
+        console.error(`Failed to split ${file.name}:`, err);
+        alert(
+          `Could not split "${file.name}" into pages (${err?.message || err}). ` +
+            `Uploading it as-is - the backend will rasterize it instead.`,
+        );
+        files.value.push(createFileItem(file));
+      } finally {
+        splittingPdfs.value--;
+      }
+    } else {
+      files.value.push(createFileItem(file));
+    }
+  }
 };
 
 const startEditing = (file) => {
@@ -921,7 +1176,9 @@ const applyExtractedData = (fileItem, data) => {
     tipo_de_gasto: data.tipo_de_gasto || "",
     descripcion: data.descripcion || "",
     fecha: data.fecha || "",
-    monto_en_bienes: data.monto_en_bienes ? data.monto_en_bienes.toString() : "",
+    monto_en_bienes: data.monto_en_bienes
+      ? data.monto_en_bienes.toString()
+      : "",
     itbis: data.itbis ? data.itbis.toString() : "",
     selectivo: data.selectivo ? data.selectivo.toString() : "",
     metodo_de_pago: data.metodo_de_pago || "",
@@ -953,7 +1210,7 @@ const runSingleFileEvaluation = async (fileItem) => {
     alert(
       `Individual evaluation rate limit reached ` +
         `(${INDIVIDUAL_RPM} requests / minute). ` +
-        `Try again in ${individualLimit.label.value}.`
+        `Try again in ${individualLimit.label.value}.`,
     );
     return;
   }
@@ -998,6 +1255,12 @@ const isImageFile = (file) => {
   return file.file.type.startsWith("image/");
 };
 
+const isPdfFile = (file) => {
+  return (
+    file?.file?.type === "application/pdf" || /\.pdf$/i.test(file?.name || "")
+  );
+};
+
 // Returns the upper-case file extension (without the dot) for a fileItem, e.g.
 // "image.PNG" -> "PNG", "doc.pdf" -> "PDF". Falls back to "FILE" if missing.
 const getFileExtension = (fileItem) => {
@@ -1023,8 +1286,12 @@ const getExtensionClasses = (ext) => {
 
 const openPreview = (file) => {
   previewFile.value = file;
-  if (isImageFile(file)) {
+  // Both images and PDFs need a blob URL: <img src> for images, <iframe src>
+  // for PDFs (browsers natively render PDFs in iframes).
+  if (isImageFile(file) || isPdfFile(file)) {
     previewUrl.value = URL.createObjectURL(file.file);
+  } else {
+    previewUrl.value = null;
   }
 };
 
@@ -1123,7 +1390,7 @@ const processAll = async () => {
 
       if (!response.ok) {
         throw new Error(
-          `Batch upload failed: ${response.status} ${response.statusText}`
+          `Batch upload failed: ${response.status} ${response.statusText}`,
         );
       }
 
@@ -1174,7 +1441,7 @@ const processAll = async () => {
     // "Process All Files" again once the batch cooldown timer hits zero.
     console.info(
       `Process All stopped early: batch rate limit reached. ` +
-        `Resume in ${batchLimit.label.value}.`
+        `Resume in ${batchLimit.label.value}.`,
     );
   }
 };

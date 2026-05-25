@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@pinia/nuxt": "latest",
+    "pdfjs-dist": "^5.7.284",
     "pinia": "latest"
   }
 }

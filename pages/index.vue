@@ -1,46 +1,77 @@
 <template>
-  <div
-    class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900"
-  >
-    <div
-      class="px-6 py-12 transition-[margin] duration-200"
-      :style="previewFile ? { marginRight: `${previewWidth}px` } : null"
-    >
-      <!-- Header -->
-      <header class="mb-12 max-w-7xl mx-auto">
-        <h1
-          class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400 tracking-tight"
-        >
-          Receipt Processor
-        </h1>
-        <p class="mt-2 text-slate-400 text-lg">
-          Upload, process, and export your receipts
-        </p>
-      </header>
+  <div class="min-h-screen px-8 py-8">
+    <div class="mx-auto flex max-w-6xl gap-8">
+      <!-- Main column -->
+      <div class="min-w-0 flex-1">
+        <!-- Header -->
+        <header class="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 class="text-2xl font-bold tracking-tight text-gray-900">
+              Extraer información
+            </h1>
+            <p class="mt-1 text-sm text-gray-500">
+              Sube documentos para extraer su información automáticamente.
+              Soporta PDF, PNG y JPG.
+            </p>
+          </div>
+          <a
+            href="https://github.com"
+            target="_blank"
+            rel="noopener"
+            class="hidden flex-shrink-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 sm:flex"
+          >
+            <svg
+              class="h-4 w-4 text-gray-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            Saber más
+          </a>
+        </header>
 
-      <!-- File Upload Area -->
-      <div class="max-w-4xl mx-auto mb-10">
-        <div
-          class="group relative border-2 border-dashed border-slate-600 rounded-2xl p-12 text-center bg-slate-800/50 backdrop-blur transition-all duration-300 hover:border-emerald-500/70 hover:bg-slate-800/80 cursor-pointer"
-          @drop="handleDrop"
-          @dragover.prevent
-          @dragenter.prevent
-          @click="$refs.fileInput.click()"
+        <!-- Add files card -->
+        <section
+          class="rounded-xl border border-gray-200 bg-white shadow-sm"
         >
-          <input
-            ref="fileInput"
-            type="file"
-            multiple
-            accept=".pdf,.png,.jpg,.jpeg"
-            @change="handleFileSelect"
-            class="hidden"
-          />
-          <div class="space-y-4">
+          <button
+            type="button"
+            @click="addFilesOpen = !addFilesOpen"
+            class="flex w-full items-center justify-between px-5 py-4"
+          >
+            <span class="text-base font-semibold text-gray-900"
+              >Agregar archivos</span
+            >
+            <svg
+              class="h-4 w-4 text-gray-500 transition-transform"
+              :class="{ '-rotate-180': !addFilesOpen }"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M5 15l7-7 7 7"
+              />
+            </svg>
+          </button>
+
+          <div v-show="addFilesOpen" class="px-5 pb-5">
+            <!-- Warning banner -->
             <div
-              class="w-16 h-16 mx-auto rounded-full bg-emerald-500/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-300"
+              class="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800"
             >
               <svg
-                class="w-8 h-8 text-emerald-400"
+                class="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -49,506 +80,559 @@
                   stroke-linecap="round"
                   stroke-linejoin="round"
                   stroke-width="2"
-                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 />
               </svg>
+              Si subes un PDF, asegúrate de poder seleccionar/resaltar el texto.
             </div>
-            <div>
-              <p class="text-slate-300 text-lg">Drag and drop files here or</p>
-              <button
-                @click.stop="$refs.fileInput.click()"
-                class="mt-3 px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold rounded-lg shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 transition-all duration-300 hover:-translate-y-0.5"
-              >
-                Select Files
-              </button>
-            </div>
-            <p class="text-sm text-slate-500">
-              Supports: PDF, PNG, JPG, JPEG · Max {{ MAX_FILE_SIZE_LABEL }} per
-              file · PDFs are split into one row per page
-            </p>
-            <p
-              v-if="splittingPdfs > 0"
-              class="text-sm text-cyan-300 flex items-center justify-center gap-2"
+
+            <!-- Drag & drop -->
+            <div
+              class="group cursor-pointer rounded-xl border-2 border-dashed border-gray-300 bg-gray-50/60 px-6 py-12 text-center transition hover:border-emerald-400 hover:bg-emerald-50/40"
+              @drop="handleDrop"
+              @dragover.prevent
+              @dragenter.prevent
+              @click="fileInput?.click()"
             >
+              <input
+                ref="fileInput"
+                type="file"
+                multiple
+                accept=".pdf,.png,.jpg,.jpeg"
+                @change="handleFileSelect"
+                class="hidden"
+              />
+              <div
+                class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-400 transition group-hover:bg-emerald-100 group-hover:text-emerald-600"
+              >
+                <svg
+                  class="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                  />
+                </svg>
+              </div>
+              <p class="text-sm font-medium text-gray-700">
+                Arrastra y suelta archivos aquí, o haz clic para seleccionar
+              </p>
+              <p class="mt-1 text-xs text-gray-400">
+                Tipos soportados: pdf, png, jpg, jpeg · Máx
+                {{ MAX_FILE_SIZE_LABEL }} por archivo · los PDF se dividen en una
+                fila por página
+              </p>
+              <p
+                v-if="splittingPdfs > 0"
+                class="mt-3 flex items-center justify-center gap-2 text-sm text-emerald-600"
+              >
+                <svg
+                  class="h-4 w-4 animate-spin"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke-width="3"
+                    stroke-opacity="0.25"
+                  />
+                  <path
+                    stroke-linecap="round"
+                    stroke-width="3"
+                    d="M22 12a10 10 0 00-10-10"
+                  />
+                </svg>
+                Dividiendo {{ splittingPdfs }} PDF{{
+                  splittingPdfs === 1 ? "" : "s"
+                }}
+                en páginas...
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Rate limit / cooldown banner -->
+        <div
+          v-if="batchLimit.isLimited.value || individualLimit.isLimited.value"
+          class="mt-6 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-5 py-4 text-rose-700"
+        >
+          <svg
+            class="mt-0.5 h-5 w-5 flex-shrink-0 text-rose-500"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <div class="flex-1 space-y-1.5 text-sm">
+            <p v-if="batchLimit.isLimited.value">
+              <span class="font-semibold">Procesar</span> en enfriamiento ({{
+                batchLimit.used.value
+              }}
+              / {{ BATCH_RPM }} por minuto) — reintenta en
+              <span class="font-mono font-bold">{{
+                batchLimit.label.value
+              }}</span
+              >.
+            </p>
+            <p v-if="individualLimit.isLimited.value">
+              <span class="font-semibold">Reintentar / Reevaluar</span> en
+              enfriamiento ({{ individualLimit.used.value }} /
+              {{ INDIVIDUAL_RPM }} por minuto) — reintenta en
+              <span class="font-mono font-bold">{{
+                individualLimit.label.value
+              }}</span
+              >.
+            </p>
+          </div>
+        </div>
+
+        <!-- Scanned information table -->
+        <section v-if="files.length > 0" class="mt-10">
+          <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-base font-semibold text-gray-900">
+              Información escaneada
+              <span
+                class="ml-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500"
+                >{{ files.length }}</span
+              >
+            </h2>
+            <div class="relative">
               <svg
-                class="animate-spin w-4 h-4"
+                class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
               >
-                <circle
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke-width="3"
-                  stroke-opacity="0.25"
-                />
                 <path
                   stroke-linecap="round"
-                  stroke-width="3"
-                  d="M22 12a10 10 0 00-10-10"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"
                 />
               </svg>
-              Splitting {{ splittingPdfs }} PDF{{
-                splittingPdfs === 1 ? "" : "s"
-              }}
-              into pages...
-            </p>
+              <input
+                v-model="search"
+                type="text"
+                placeholder="Buscar..."
+                class="w-56 rounded-lg border border-gray-300 bg-white py-1.5 pl-9 pr-3 text-sm text-gray-700 placeholder-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+              />
+            </div>
+          </div>
+
+          <div
+            class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+          >
+            <div class="overflow-x-auto">
+              <table class="w-full">
+                <thead class="border-b border-gray-200 bg-gray-50">
+                  <tr>
+                    <th
+                      v-for="col in columns"
+                      :key="col"
+                      class="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500"
+                      :class="
+                        col === 'Preview' || col === 'Acciones'
+                          ? 'text-center'
+                          : ''
+                      "
+                    >
+                      {{ col }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                  <tr
+                    v-for="file in filteredFiles"
+                    :key="file.id"
+                    class="transition-colors hover:bg-gray-50"
+                    :class="{ 'bg-amber-50': isEdited(file) }"
+                  >
+                    <!-- File Name -->
+                    <td class="px-4 py-2.5">
+                      <input
+                        type="text"
+                        v-model="file.editableData.filename"
+                        @focus="startEditing(file)"
+                        class="w-44 rounded border border-transparent bg-transparent px-2 py-1 font-medium text-gray-700 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      />
+                    </td>
+                    <!-- Type -->
+                    <td class="px-4 py-2.5">
+                      <span
+                        class="inline-flex rounded-md px-2 py-0.5 font-mono text-xs font-semibold"
+                        :class="getExtensionClasses(getFileExtension(file))"
+                      >
+                        {{ getFileExtension(file) }}
+                      </span>
+                    </td>
+                    <!-- Status -->
+                    <td class="px-4 py-2.5">
+                      <span
+                        class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold"
+                        :class="getStatusClasses(file.status)"
+                      >
+                        {{ getStatusLabel(file.status) }}
+                      </span>
+                    </td>
+                    <!-- Score -->
+                    <td class="px-4 py-2.5">
+                      <span
+                        v-if="file.score > 0"
+                        class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold"
+                        :class="getScoreClasses(file.score)"
+                      >
+                        {{ file.score }}
+                      </span>
+                      <span v-else class="text-gray-300">-</span>
+                    </td>
+                    <!-- Processing Time -->
+                    <td class="px-4 py-2.5">
+                      <span
+                        v-if="file.processingTime"
+                        class="font-mono text-sm text-gray-500"
+                      >
+                        {{ formatTime(file.processingTime) }}
+                      </span>
+                      <span v-else class="text-gray-300">-</span>
+                    </td>
+                    <!-- Documento -->
+                    <td class="px-4 py-2.5">
+                      <input
+                        type="text"
+                        v-model="file.editableData.documento"
+                        @focus="startEditing(file)"
+                        class="w-28 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                        placeholder="-"
+                      />
+                    </td>
+                    <!-- NCF -->
+                    <td class="px-4 py-2.5">
+                      <input
+                        type="text"
+                        v-model="file.editableData.ncf"
+                        @focus="startEditing(file)"
+                        class="w-36 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                        placeholder="-"
+                      />
+                    </td>
+                    <!-- Tipo de Suplidor -->
+                    <td class="px-4 py-2.5">
+                      <input
+                        type="text"
+                        v-model="file.editableData.tipo_de_suplidor"
+                        @focus="startEditing(file)"
+                        class="w-28 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                        placeholder="-"
+                      />
+                    </td>
+                    <!-- Tipo de Gasto -->
+                    <td class="px-4 py-2.5">
+                      <input
+                        type="text"
+                        v-model="file.editableData.tipo_de_gasto"
+                        @focus="startEditing(file)"
+                        class="w-64 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                        placeholder="-"
+                      />
+                    </td>
+                    <!-- Descripción -->
+                    <td class="px-4 py-2.5">
+                      <input
+                        type="text"
+                        v-model="file.editableData.descripcion"
+                        @focus="startEditing(file)"
+                        class="w-28 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                        placeholder="-"
+                      />
+                    </td>
+                    <!-- Fecha -->
+                    <td class="px-4 py-2.5">
+                      <input
+                        type="text"
+                        v-model="file.editableData.fecha"
+                        @focus="startEditing(file)"
+                        class="w-24 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                        placeholder="-"
+                      />
+                    </td>
+                    <!-- Monto en Bienes -->
+                    <td class="px-4 py-2.5">
+                      <div class="flex items-center">
+                        <span class="mr-1 text-sm text-gray-400">$</span>
+                        <input
+                          type="text"
+                          v-model="file.editableData.monto_en_bienes"
+                          @focus="startEditing(file)"
+                          class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-700 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                          placeholder="-"
+                        />
+                      </div>
+                    </td>
+                    <!-- ITBIS -->
+                    <td class="px-4 py-2.5">
+                      <div class="flex items-center">
+                        <span class="mr-1 text-sm text-gray-400">$</span>
+                        <input
+                          type="text"
+                          v-model="file.editableData.itbis"
+                          @focus="startEditing(file)"
+                          class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                          placeholder="-"
+                        />
+                      </div>
+                    </td>
+                    <!-- Selectivo -->
+                    <td class="px-4 py-2.5">
+                      <div class="flex items-center">
+                        <span class="mr-1 text-sm text-gray-400">$</span>
+                        <input
+                          type="text"
+                          v-model="file.editableData.selectivo"
+                          @focus="startEditing(file)"
+                          class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                          placeholder="-"
+                        />
+                      </div>
+                    </td>
+                    <!-- Forma de Pago -->
+                    <td class="px-4 py-2.5">
+                      <input
+                        type="text"
+                        v-model="file.editableData.metodo_de_pago"
+                        @focus="startEditing(file)"
+                        class="w-40 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                        placeholder="-"
+                      />
+                    </td>
+                    <!-- Preview Button -->
+                    <td class="px-4 py-2.5 text-center">
+                      <button
+                        @click="openPreview(file)"
+                        class="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                        title="Vista previa"
+                      >
+                        <svg
+                          class="h-5 w-5"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                          />
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                          />
+                        </svg>
+                      </button>
+                    </td>
+                    <!-- Actions -->
+                    <td class="px-4 py-2.5 text-center">
+                      <div class="flex items-center justify-center gap-1.5">
+                        <button
+                          v-if="
+                            file.status === 'needs_retry' ||
+                            file.status === 'error'
+                          "
+                          @click="retryFile(file)"
+                          :disabled="individualLimit.isLimited.value"
+                          class="rounded-lg p-2 text-emerald-600 transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          :title="
+                            individualLimit.isLimited.value
+                              ? `Límite alcanzado - espera ${individualLimit.label.value}`
+                              : 'Reintentar procesamiento'
+                          "
+                        >
+                          <svg
+                            class="h-5 w-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                        </button>
+                        <button
+                          v-if="
+                            file.status === 'done' &&
+                            file.score > 0 &&
+                            file.score < 3
+                          "
+                          @click="reevaluateFile(file)"
+                          :disabled="individualLimit.isLimited.value"
+                          class="rounded-lg p-2 text-purple-600 transition-colors hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          :title="
+                            individualLimit.isLimited.value
+                              ? `Límite alcanzado - espera ${individualLimit.label.value}`
+                              : 'Reevaluar (baja confianza)'
+                          "
+                        >
+                          <svg
+                            class="h-5 w-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                            />
+                          </svg>
+                        </button>
+                        <button
+                          v-if="isEdited(file)"
+                          @click="revertFile(file)"
+                          class="rounded-lg p-2 text-amber-600 transition-colors hover:bg-amber-50"
+                          title="Revertir cambios"
+                        >
+                          <svg
+                            class="h-5 w-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                            />
+                          </svg>
+                        </button>
+                        <button
+                          @click="removeFile(file)"
+                          class="rounded-lg p-2 text-rose-500 transition-colors hover:bg-rose-50"
+                          title="Eliminar"
+                        >
+                          <svg
+                            class="h-5 w-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M6 18L18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Data sources side panel -->
+      <aside
+        v-if="files.length > 0"
+        class="hidden w-72 flex-shrink-0 lg:block"
+      >
+        <div class="sticky top-8 space-y-4">
+        <h2 class="text-sm font-semibold text-gray-900">Data sources</h2>
+
+        <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+          <div
+            class="flex items-center justify-between px-4 py-3 text-sm text-gray-700"
+          >
+            <span class="flex items-center gap-2">
+              <svg
+                class="h-4 w-4 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.8"
+                  d="M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1zm7 0v5h5"
+                />
+              </svg>
+              {{ sourceDocuments.length }}
+              {{ sourceDocuments.length === 1 ? "Archivo" : "Archivos" }}
+            </span>
+            <span class="font-medium text-gray-500">{{
+              formatBytes(totalSourceSize)
+            }}</span>
+          </div>
+          <div
+            class="flex items-center gap-2 border-t border-gray-100 px-4 py-3 text-sm text-gray-700"
+          >
+            <svg
+              class="h-4 w-4 text-gray-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.8"
+                d="M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.5-2.5 2.5-15 0-18m0 18c-2.5-2.5-2.5-15 0-18M3 12h18"
+              />
+            </svg>
+            {{ files.length }} entradas escaneadas
           </div>
         </div>
-      </div>
 
-      <!-- Rate limit / cooldown banner -->
-      <div
-        v-if="batchLimit.isLimited.value || individualLimit.isLimited.value"
-        class="max-w-4xl mx-auto mb-6 px-5 py-4 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-200 flex items-start gap-3"
-      >
-        <svg
-          class="w-6 h-6 flex-shrink-0 text-rose-300 mt-0.5"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
+        <!-- Multipage breakdown -->
+        <div
+          v-if="multipageDocuments.length"
+          class="rounded-xl border border-gray-200 bg-white px-4 py-3"
         >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
-        <div class="flex-1 space-y-1.5">
-          <p v-if="batchLimit.isLimited.value" class="text-sm">
-            <span class="font-semibold">Process All Files</span>
-            cooldown ({{ batchLimit.used.value }} / {{ BATCH_RPM }} per minute ·
-            gemini-3.5-flash) — try again in
-            <span class="font-mono font-bold text-rose-100">{{
-              batchLimit.label.value
-            }}</span
-            >.
+          <p class="mb-2 text-xs font-medium text-gray-400">
+            Documentos multipágina
           </p>
-          <p v-if="individualLimit.isLimited.value" class="text-sm">
-            <span class="font-semibold">Retry / Reevaluate</span>
-            cooldown ({{ individualLimit.used.value }} /
-            {{ INDIVIDUAL_RPM }} per minute · gemma-4-26b) — try again in
-            <span class="font-mono font-bold text-rose-100">{{
-              individualLimit.label.value
-            }}</span
-            >.
-          </p>
-        </div>
-      </div>
-
-      <!-- File List - Full Width -->
-      <div
-        v-if="files.length > 0"
-        class="bg-slate-800/60 backdrop-blur rounded-2xl border border-slate-700/50 overflow-hidden"
-      >
-        <div class="px-6 py-5 border-b border-slate-700/50">
-          <h2 class="text-xl font-semibold text-slate-200">
-            Selected Files
-            <span
-              class="ml-2 px-2.5 py-1 text-sm bg-slate-700 rounded-full text-slate-300"
-              >{{ files.length }}</span
+          <ul class="space-y-1.5">
+            <li
+              v-for="doc in multipageDocuments"
+              :key="doc.id"
+              class="flex items-center justify-between gap-2 text-xs text-gray-600"
             >
-          </h2>
-        </div>
-
-        <div class="overflow-x-auto">
-          <table class="w-full">
-            <thead class="bg-slate-900/50">
-              <tr>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  File Name
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Type
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Status
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Score
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Processing Time
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Documento
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  NCF
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Tipo de Suplidor
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Tipo de Gasto
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Descripción
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Fecha
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Monto Bienes
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  ITBIS
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Selectivo
-                </th>
-                <th
-                  class="px-4 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Forma de Pago
-                </th>
-                <th
-                  class="px-4 py-4 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Preview
-                </th>
-                <th
-                  class="px-4 py-4 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                >
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-700/50">
-              <tr
-                v-for="file in files"
-                :key="file.id"
-                class="hover:bg-slate-700/30 transition-colors duration-150"
-                :class="{ 'bg-amber-900/10': isEdited(file) }"
+              <span class="truncate">{{ doc.name }}</span>
+              <span
+                class="flex-shrink-0 rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-500"
+                >{{ doc.pages }} entradas</span
               >
-                <!-- File Name -->
-                <td class="px-4 py-3">
-                  <input
-                    type="text"
-                    v-model="file.editableData.filename"
-                    @focus="startEditing(file)"
-                    class="w-full bg-transparent text-slate-300 font-medium border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
-                  />
-                </td>
-                <!-- Type -->
-                <td class="px-4 py-3">
-                  <span
-                    class="inline-flex px-2.5 py-1 text-xs font-mono font-semibold rounded-md"
-                    :class="getExtensionClasses(getFileExtension(file))"
-                  >
-                    {{ getFileExtension(file) }}
-                  </span>
-                </td>
-                <!-- Status -->
-                <td class="px-4 py-3">
-                  <span
-                    class="inline-flex px-3 py-1 text-xs font-semibold rounded-full"
-                    :class="getStatusClasses(file.status)"
-                  >
-                    {{ getStatusLabel(file.status) }}
-                  </span>
-                </td>
-                <!-- Score -->
-                <td class="px-4 py-3">
-                  <span
-                    v-if="file.score > 0"
-                    class="inline-flex px-3 py-1 text-xs font-semibold rounded-full"
-                    :class="getScoreClasses(file.score)"
-                  >
-                    {{ file.score }}
-                  </span>
-                  <span v-else class="text-slate-500">-</span>
-                </td>
-                <!-- Processing Time -->
-                <td class="px-4 py-3">
-                  <span
-                    v-if="file.processingTime"
-                    class="text-slate-400 font-mono text-sm"
-                  >
-                    {{ formatTime(file.processingTime) }}
-                  </span>
-                  <span v-else class="text-slate-500">-</span>
-                </td>
-                <!-- Documento -->
-                <td class="px-4 py-3">
-                  <input
-                    type="text"
-                    v-model="file.editableData.documento"
-                    @focus="startEditing(file)"
-                    class="w-28 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors font-mono text-sm"
-                    placeholder="-"
-                  />
-                </td>
-                <!-- NCF -->
-                <td class="px-4 py-3">
-                  <input
-                    type="text"
-                    v-model="file.editableData.ncf"
-                    @focus="startEditing(file)"
-                    class="w-36 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors font-mono text-sm"
-                    placeholder="-"
-                  />
-                </td>
-                <!-- Tipo de Suplidor -->
-                <td class="px-4 py-3">
-                  <input
-                    type="text"
-                    v-model="file.editableData.tipo_de_suplidor"
-                    @focus="startEditing(file)"
-                    class="w-28 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors text-sm"
-                    placeholder="-"
-                  />
-                </td>
-                <!-- Tipo de Gasto -->
-                <td class="px-4 py-3">
-                  <input
-                    type="text"
-                    v-model="file.editableData.tipo_de_gasto"
-                    @focus="startEditing(file)"
-                    class="w-64 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors text-sm"
-                    placeholder="-"
-                  />
-                </td>
-                <!-- Descripción -->
-                <td class="px-4 py-3">
-                  <input
-                    type="text"
-                    v-model="file.editableData.descripcion"
-                    @focus="startEditing(file)"
-                    class="w-28 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors text-sm"
-                    placeholder="-"
-                  />
-                </td>
-                <!-- Fecha -->
-                <td class="px-4 py-3">
-                  <input
-                    type="text"
-                    v-model="file.editableData.fecha"
-                    @focus="startEditing(file)"
-                    class="w-24 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors text-sm"
-                    placeholder="-"
-                  />
-                </td>
-                <!-- Monto en Bienes -->
-                <td class="px-4 py-3">
-                  <div class="flex items-center">
-                    <span class="text-slate-500 mr-1 text-sm">$</span>
-                    <input
-                      type="text"
-                      v-model="file.editableData.monto_en_bienes"
-                      @focus="startEditing(file)"
-                      class="w-20 bg-transparent text-slate-300 font-mono text-sm border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
-                      placeholder="-"
-                    />
-                  </div>
-                </td>
-                <!-- ITBIS -->
-                <td class="px-4 py-3">
-                  <div class="flex items-center">
-                    <span class="text-slate-500 mr-1 text-sm">$</span>
-                    <input
-                      type="text"
-                      v-model="file.editableData.itbis"
-                      @focus="startEditing(file)"
-                      class="w-20 bg-transparent text-slate-400 font-mono text-sm border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
-                      placeholder="-"
-                    />
-                  </div>
-                </td>
-                <!-- Selectivo -->
-                <td class="px-4 py-3">
-                  <div class="flex items-center">
-                    <span class="text-slate-500 mr-1 text-sm">$</span>
-                    <input
-                      type="text"
-                      v-model="file.editableData.selectivo"
-                      @focus="startEditing(file)"
-                      class="w-20 bg-transparent text-slate-400 font-mono text-sm border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors"
-                      placeholder="-"
-                    />
-                  </div>
-                </td>
-                <!-- Forma de Pago -->
-                <td class="px-4 py-3">
-                  <input
-                    type="text"
-                    v-model="file.editableData.metodo_de_pago"
-                    @focus="startEditing(file)"
-                    class="w-40 bg-transparent text-slate-400 border border-transparent rounded px-2 py-1 hover:border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-colors text-sm"
-                    placeholder="-"
-                  />
-                </td>
-                <!-- Preview Button -->
-                <td class="px-4 py-3 text-center">
-                  <button
-                    @click="openPreview(file)"
-                    class="p-2 rounded-lg bg-slate-700/50 hover:bg-slate-600 text-slate-400 hover:text-slate-200 transition-colors"
-                    title="Preview file"
-                  >
-                    <svg
-                      class="w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                      />
-                    </svg>
-                  </button>
-                </td>
-                <!-- Actions -->
-                <td class="px-4 py-3 text-center">
-                  <div class="flex items-center justify-center gap-2">
-                    <!-- Retry Button (visible for needs_retry or error status) -->
-                    <button
-                      v-if="
-                        file.status === 'needs_retry' || file.status === 'error'
-                      "
-                      @click="retryFile(file)"
-                      :disabled="individualLimit.isLimited.value"
-                      class="p-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 hover:text-cyan-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-cyan-500/20"
-                      :title="
-                        individualLimit.isLimited.value
-                          ? `Rate limited - wait ${individualLimit.label.value}`
-                          : 'Retry processing (gemma-4-26b)'
-                      "
-                    >
-                      <svg
-                        class="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                        />
-                      </svg>
-                    </button>
-                    <!-- Reevaluate Button (visible for done files with low score: 1 or 2) -->
-                    <button
-                      v-if="
-                        file.status === 'done' &&
-                        file.score > 0 &&
-                        file.score < 3
-                      "
-                      @click="reevaluateFile(file)"
-                      :disabled="individualLimit.isLimited.value"
-                      class="p-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 hover:text-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-purple-500/20"
-                      :title="
-                        individualLimit.isLimited.value
-                          ? `Rate limited - wait ${individualLimit.label.value}`
-                          : 'Reevaluate with Gemma (low confidence score)'
-                      "
-                    >
-                      <svg
-                        class="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-                        />
-                      </svg>
-                    </button>
-                    <!-- Revert Button (only visible if edited) -->
-                    <button
-                      v-if="isEdited(file)"
-                      @click="revertFile(file)"
-                      class="p-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 hover:text-amber-300 transition-colors"
-                      title="Revert changes"
-                    >
-                      <svg
-                        class="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-                        />
-                      </svg>
-                    </button>
-                    <!-- Remove Button -->
-                    <button
-                      @click="removeFile(file)"
-                      class="p-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-red-300 transition-colors"
-                      title="Remove file"
-                    >
-                      <svg
-                        class="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M6 18L18 6M6 6l12 12"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+            </li>
+          </ul>
         </div>
 
         <!-- Actions -->
-        <div
-          class="px-6 py-5 border-t border-slate-700/50 flex flex-wrap gap-3 items-center"
-        >
+        <div class="space-y-2 rounded-xl border border-gray-200 bg-white p-3">
           <button
             @click="processAll"
             :disabled="
@@ -556,104 +640,61 @@
               batchLimit.isLimited.value ||
               files.every((f) => f.status !== 'pending')
             "
-            class="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold rounded-lg shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 transition-all duration-300 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-emerald-500/25"
+            class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
             :title="
               batchLimit.isLimited.value
-                ? `Rate limited - wait ${batchLimit.label.value}`
-                : 'Process all pending files (gemini-3.5-flash, batches of 10)'
+                ? `Límite alcanzado - espera ${batchLimit.label.value}`
+                : 'Procesar archivos pendientes con IA'
             "
           >
-            <template v-if="processing">Processing...</template>
+            <template v-if="processing">Procesando...</template>
             <template v-else-if="batchLimit.isLimited.value">
-              Cooldown · {{ batchLimit.label.value }}
+              Enfriamiento · {{ batchLimit.label.value }}
             </template>
-            <template v-else>Process All Files</template>
+            <template v-else>Procesar</template>
+          </button>
+          <button
+            @click="fileInput?.click()"
+            class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
+          >
+            Cargar más documentos
+          </button>
+          <button
+            @click="clearFiles"
+            class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
+          >
+            Descartar todos
           </button>
           <button
             v-if="files.some((f) => f.status === 'done')"
             @click="downloadExcel"
-            class="px-6 py-2.5 bg-slate-700 text-slate-200 font-semibold rounded-lg hover:bg-slate-600 transition-all duration-300 border border-slate-600"
+            class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
           >
-            Download Excel
+            Descargar Excel
           </button>
-          <button
-            @click="clearFiles"
-            class="px-6 py-2.5 bg-transparent text-slate-400 font-semibold rounded-lg hover:bg-slate-700/50 hover:text-slate-200 transition-all duration-300 border border-slate-600"
-          >
-            Clear All
-          </button>
-          <!-- API usage indicators -->
-          <div
-            class="ml-auto flex items-center flex-wrap gap-x-5 gap-y-2 text-slate-400 text-sm"
-          >
-            <div
-              class="flex items-center gap-2"
-              :title="`Batch calls (gemini-3.5-flash) made in the last 60s (limit: ${BATCH_RPM})`"
-            >
-              <span class="font-medium">Batch:</span>
-              <span
-                class="font-mono font-semibold"
-                :class="
-                  batchLimit.isLimited.value
-                    ? 'text-rose-300'
-                    : batchLimit.used.value >= BATCH_RPM - 1
-                      ? 'text-amber-300'
-                      : 'text-slate-300'
-                "
-                >{{ batchLimit.used.value }} / {{ BATCH_RPM }} per min</span
-              >
-              <span
-                v-if="batchLimit.isLimited.value"
-                class="px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-200 font-mono text-xs"
-                >{{ batchLimit.label.value }}</span
-              >
-            </div>
-            <div
-              class="flex items-center gap-2"
-              :title="`Single-file calls (gemma-4-26b) made in the last 60s (limit: ${INDIVIDUAL_RPM})`"
-            >
-              <span class="font-medium">Single:</span>
-              <span
-                class="font-mono font-semibold"
-                :class="
-                  individualLimit.isLimited.value
-                    ? 'text-rose-300'
-                    : individualLimit.used.value >= INDIVIDUAL_RPM - 3
-                      ? 'text-amber-300'
-                      : 'text-slate-300'
-                "
-                >{{ individualLimit.used.value }} / {{ INDIVIDUAL_RPM }} per
-                min</span
-              >
-              <span
-                v-if="individualLimit.isLimited.value"
-                class="px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-200 font-mono text-xs"
-                >{{ individualLimit.label.value }}</span
-              >
-            </div>
-            <div v-if="totalProcessingTime > 0" class="flex items-center gap-2">
-              <span class="font-medium">Total Elapsed Time:</span>
-              <span class="text-slate-300 font-mono font-semibold">{{
-                formatTime(totalProcessingTime)
-              }}</span>
-            </div>
-          </div>
         </div>
-      </div>
+
+        <p
+          v-if="totalProcessingTime > 0"
+          class="text-center text-xs text-gray-400"
+        >
+          Tiempo total: {{ formatTime(totalProcessingTime) }}
+        </p>
+        </div>
+      </aside>
     </div>
 
     <!-- Side Panel Preview -->
     <Transition name="slide">
       <div
         v-if="previewFile"
-        class="fixed right-0 top-0 h-full bg-slate-800 border-l border-slate-700 shadow-2xl z-40 flex flex-col"
+        class="fixed right-0 top-0 z-40 flex h-full flex-col border-l border-gray-200 bg-white shadow-2xl"
         :style="{ width: `${previewWidth}px` }"
       >
-        <!-- Resize handle (drag to change preview width) -->
         <div
-          class="absolute left-0 top-0 h-full w-1.5 -translate-x-1/2 cursor-col-resize group z-50"
+          class="group absolute left-0 top-0 z-50 h-full w-1.5 -translate-x-1/2 cursor-col-resize"
           @mousedown="startPreviewResize"
-          :title="`Drag to resize · ${previewWidth}px`"
+          :title="`Arrastra para redimensionar · ${previewWidth}px`"
         >
           <div
             class="h-full w-full transition-colors"
@@ -664,19 +705,18 @@
             "
           ></div>
         </div>
-        <!-- Header -->
         <div
-          class="px-4 py-4 border-b border-slate-700 flex items-center justify-between"
+          class="flex items-center justify-between border-b border-gray-200 px-4 py-4"
         >
-          <h3 class="text-lg font-semibold text-slate-200 truncate">
+          <h3 class="truncate text-base font-semibold text-gray-900">
             {{ previewFile.name }}
           </h3>
           <button
             @click="closePreview"
-            class="p-2 rounded-lg bg-slate-700/50 text-slate-300 hover:text-white hover:bg-slate-600 transition-colors"
+            class="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
           >
             <svg
-              class="w-5 h-5"
+              class="h-5 w-5"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -691,24 +731,21 @@
           </button>
         </div>
 
-        <!-- Preview Content -->
         <div class="flex-1 overflow-auto p-4">
-          <!-- Image Preview -->
           <div
             v-if="isImageFile(previewFile)"
-            class="bg-slate-900 rounded-xl overflow-hidden"
+            class="overflow-hidden rounded-xl bg-gray-100"
           >
             <img
               :src="previewUrl"
               :alt="previewFile.name"
-              class="w-full h-auto object-contain"
+              class="h-auto w-full object-contain"
             />
           </div>
 
-          <!-- PDF Preview (iframe with blob URL) -->
           <div
             v-else-if="isPdfFile(previewFile)"
-            class="bg-slate-900 rounded-xl overflow-hidden h-full flex flex-col"
+            class="flex h-full flex-col overflow-hidden rounded-xl bg-gray-100"
           >
             <iframe
               :src="previewUrl"
@@ -716,18 +753,16 @@
               class="w-full flex-1 bg-white"
               style="min-height: 70vh"
             ></iframe>
-            <p
-              class="px-3 py-2 text-xs text-slate-500 border-t border-slate-700"
-            >
-              PDFs are normally split into one row per page on upload. This file
-              kept as-is - the backend will rasterize up to 5 pages.
+            <p class="border-t border-gray-200 px-3 py-2 text-xs text-gray-400">
+              Los PDF normalmente se dividen en una fila por página al subir.
             </p>
           </div>
 
-          <!-- Fallback for unknown types -->
-          <div v-else class="bg-slate-900 rounded-xl p-8 text-center">
-            <p class="text-slate-400 text-sm">{{ previewFile.name }}</p>
-            <p class="text-slate-500 text-xs mt-2">No preview available.</p>
+          <div v-else class="rounded-xl bg-gray-100 p-8 text-center">
+            <p class="text-sm text-gray-600">{{ previewFile.name }}</p>
+            <p class="mt-2 text-xs text-gray-400">
+              Vista previa no disponible.
+            </p>
           </div>
         </div>
       </div>
@@ -736,13 +771,37 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 
 const config = useRuntimeConfig();
 const API_BASE = config.public.apiBase;
 
+// --- UI state -------------------------------------------------------------
+const addFilesOpen = ref(true);
+const search = ref("");
+
+const columns = [
+  "File Name",
+  "Type",
+  "Status",
+  "Score",
+  "Processing Time",
+  "Documento",
+  "NCF",
+  "Tipo de Suplidor",
+  "Tipo de Gasto",
+  "Descripción",
+  "Fecha",
+  "Monto Bienes",
+  "ITBIS",
+  "Selectivo",
+  "Forma de Pago",
+  "Preview",
+  "Acciones",
+];
+
 // --- Upload limits --------------------------------------------------------
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 3 MB
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_FILE_SIZE_LABEL = "10MB";
 
 // --- PDF rendering (client-side splitting) --------------------------------
@@ -832,12 +891,6 @@ const splitPdfIntoPageFiles = async (pdfFile) => {
 };
 
 // --- Rate limiting (localStorage-backed, shared across tabs) --------------
-// We track TWO independent budgets because the two backend endpoints use
-// different models with different free-tier RPM caps:
-//   - /upload        -> gemma-4-26b      (15 RPM) - Retry / Reevaluate
-//   - /upload-batch  -> gemini-3.5-flash ( 5 RPM) - "Process All Files"
-// Each tracker keeps its own array of timestamps in localStorage, ticks down
-// once per second, and is shared across browser tabs via the storage event.
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
 const INDIVIDUAL_RPM = 15;
@@ -886,7 +939,6 @@ const createRateLimitTracker = (storageKey, rpm) => {
     const recent = read();
     used.value = recent.length;
     if (recent.length >= rpm) {
-      // The Nth-oldest call (where N = RPM) determines when the limit clears.
       const targetTimestamp = recent[recent.length - rpm];
       const expiresAt = targetTimestamp + RATE_LIMIT_WINDOW_MS;
       cooldownSec.value = Math.max(
@@ -929,12 +981,54 @@ const batchLimit = createRateLimitTracker(BATCH_RATE_LIMIT_KEY, BATCH_RPM);
 
 const fileInput = ref(null);
 const files = ref([]);
+// Ledger of original uploads (before PDF page-splitting), used by the
+// "Data sources" panel to report file counts, sizes and entry breakdown.
+const sourceDocuments = ref([]);
 const processing = ref(false);
 const previewFile = ref(null);
 const previewUrl = ref(null);
 const totalProcessingTime = ref(0);
 let fileIdCounter = 0;
+let sourceIdCounter = 0;
 let rateLimitTimer = null;
+
+const totalSourceSize = computed(() =>
+  sourceDocuments.value.reduce((sum, d) => sum + d.size, 0),
+);
+
+const multipageDocuments = computed(() =>
+  sourceDocuments.value.filter((d) => d.pages > 1),
+);
+
+const filteredFiles = computed(() => {
+  const q = search.value.trim().toLowerCase();
+  if (!q) return files.value;
+  return files.value.filter((f) => {
+    const d = f.editableData;
+    return [
+      d.filename,
+      d.documento,
+      d.ncf,
+      d.tipo_de_suplidor,
+      d.tipo_de_gasto,
+      d.descripcion,
+      d.metodo_de_pago,
+    ]
+      .filter(Boolean)
+      .some((v) => String(v).toLowerCase().includes(q));
+  });
+});
+
+const formatBytes = (bytes) => {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(
+    units.length - 1,
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+  );
+  const value = bytes / Math.pow(1024, i);
+  return `${i === 0 ? value : value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+};
 
 onMounted(() => {
   individualLimit.refresh();
@@ -1046,8 +1140,6 @@ const startPreviewResize = (event) => {
 
 const onPreviewResizeMove = (event) => {
   if (!isResizingPreview.value || typeof window === "undefined") return;
-  // The panel is anchored to the right edge; its width is the distance from
-  // the cursor to the right edge of the viewport.
   const newWidth = clampPreviewWidth(window.innerWidth - event.clientX);
   previewWidth.value = newWidth;
 };
@@ -1084,17 +1176,14 @@ const addFiles = async (fileList) => {
 
   for (const file of fileList) {
     if (!validTypes.includes(file.type)) {
-      alert(`${file.name} is not a supported file type`);
+      alert(`${file.name} no es un tipo de archivo soportado`);
       continue;
     }
 
-    // The 3MB cap applies to the original upload. After PDF rasterization
-    // the per-page PNGs may be larger, but they never leave the browser as
-    // a single payload bigger than this.
     if (file.size > MAX_FILE_SIZE_BYTES) {
       const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
       alert(
-        `${file.name} is ${sizeMb}MB which exceeds the ${MAX_FILE_SIZE_LABEL} per-file limit.`,
+        `${file.name} pesa ${sizeMb}MB y supera el límite de ${MAX_FILE_SIZE_LABEL} por archivo.`,
       );
       continue;
     }
@@ -1107,24 +1196,41 @@ const addFiles = async (fileList) => {
           throw new Error("PDF produced 0 pages");
         }
         pages.forEach((pageFile) => files.value.push(createFileItem(pageFile)));
+        sourceDocuments.value.push({
+          id: sourceIdCounter++,
+          name: file.name,
+          size: file.size,
+          pages: pages.length,
+        });
       } catch (err) {
         console.error(`Failed to split ${file.name}:`, err);
         alert(
-          `Could not split "${file.name}" into pages (${err?.message || err}). ` +
-            `Uploading it as-is - the backend will rasterize it instead.`,
+          `No se pudo dividir "${file.name}" en páginas (${err?.message || err}). ` +
+            `Se subirá tal cual.`,
         );
         files.value.push(createFileItem(file));
+        sourceDocuments.value.push({
+          id: sourceIdCounter++,
+          name: file.name,
+          size: file.size,
+          pages: 1,
+        });
       } finally {
         splittingPdfs.value--;
       }
     } else {
       files.value.push(createFileItem(file));
+      sourceDocuments.value.push({
+        id: sourceIdCounter++,
+        name: file.name,
+        size: file.size,
+        pages: 1,
+      });
     }
   }
 };
 
 const startEditing = (file) => {
-  // Save original state if not already saved
   if (!file.originalData) {
     file.originalData = { ...file.editableData };
   }
@@ -1142,10 +1248,8 @@ const isEdited = (file) => {
     file.editableData.itbis !== file.originalData.itbis ||
     file.editableData.selectivo !== file.originalData.selectivo ||
     file.editableData.metodo_de_pago !== file.originalData.metodo_de_pago ||
-    file.editableData.date !== file.originalData.date ||
-    file.editableData.vendor !== file.originalData.vendor ||
-    file.editableData.total !== file.originalData.total ||
-    file.editableData.tax !== file.originalData.tax
+    file.editableData.descripcion !== file.originalData.descripcion ||
+    file.editableData.ncf !== file.originalData.ncf
   );
 };
 
@@ -1162,8 +1266,7 @@ const removeFile = (file) => {
   }
 };
 
-// Apply an extracted-data payload from the backend to a file item, updating
-// its editableData, score, originalData snapshot and status.
+// Apply an extracted-data payload from the backend to a file item.
 const applyExtractedData = (fileItem, data) => {
   fileItem.data = data;
   fileItem.score = data.score || 0;
@@ -1201,16 +1304,12 @@ const applyExtractedData = (fileItem, data) => {
   }
 };
 
-// Single-file API call shared by Retry (failed/needs_retry) and Reevaluate
-// (done but low-confidence score). Both honor and record against the
-// localStorage rate limit and hit the individual /upload endpoint which is
-// configured to use the gemma-4-26b model on the backend.
 const runSingleFileEvaluation = async (fileItem) => {
   if (individualLimit.isLimited.value) {
     alert(
-      `Individual evaluation rate limit reached ` +
-        `(${INDIVIDUAL_RPM} requests / minute). ` +
-        `Try again in ${individualLimit.label.value}.`,
+      `Límite de evaluación individual alcanzado ` +
+        `(${INDIVIDUAL_RPM} solicitudes / minuto). ` +
+        `Reintenta en ${individualLimit.label.value}.`,
     );
     return;
   }
@@ -1240,8 +1339,6 @@ const runSingleFileEvaluation = async (fileItem) => {
     }
   } catch (error) {
     console.error("Error running single-file evaluation:", error);
-    // Revert to previous status on hard network failure so the user can retry
-    // without losing the existing extracted data (e.g. for low-score rerun).
     fileItem.status = previousStatus === "done" ? "done" : "error";
     const endTime = performance.now();
     fileItem.processingTime = endTime - startTime;
@@ -1261,8 +1358,6 @@ const isPdfFile = (file) => {
   );
 };
 
-// Returns the upper-case file extension (without the dot) for a fileItem, e.g.
-// "image.PNG" -> "PNG", "doc.pdf" -> "PDF". Falls back to "FILE" if missing.
 const getFileExtension = (fileItem) => {
   const name = fileItem?.name || "";
   const idx = name.lastIndexOf(".");
@@ -1273,21 +1368,19 @@ const getFileExtension = (fileItem) => {
 const getExtensionClasses = (ext) => {
   switch (ext) {
     case "PDF":
-      return "bg-red-500/20 text-red-300";
+      return "bg-red-100 text-red-700";
     case "PNG":
-      return "bg-blue-500/20 text-blue-300";
+      return "bg-blue-100 text-blue-700";
     case "JPG":
     case "JPEG":
-      return "bg-emerald-500/20 text-emerald-300";
+      return "bg-emerald-100 text-emerald-700";
     default:
-      return "bg-slate-600/40 text-slate-300";
+      return "bg-gray-100 text-gray-600";
   }
 };
 
 const openPreview = (file) => {
   previewFile.value = file;
-  // Both images and PDFs need a blob URL: <img src> for images, <iframe src>
-  // for PDFs (browsers natively render PDFs in iframes).
   if (isImageFile(file) || isPdfFile(file)) {
     previewUrl.value = URL.createObjectURL(file.file);
   } else {
@@ -1305,35 +1398,35 @@ const closePreview = () => {
 
 const getStatusLabel = (status) => {
   const labels = {
-    pending: "Pending",
-    processing: "Processing",
-    done: "Done",
-    duplicate: "Duplicate",
+    pending: "Pendiente",
+    processing: "Procesando",
+    done: "Listo",
+    duplicate: "Duplicado",
     error: "Error",
-    needs_retry: "Needs Retry",
-    retrying: "Retrying",
+    needs_retry: "Reintentar",
+    retrying: "Reintentando",
   };
   return labels[status] || status;
 };
 
 const getStatusClasses = (status) => {
   const classes = {
-    pending: "bg-amber-500/20 text-amber-400",
-    processing: "bg-blue-500/20 text-blue-400 animate-pulse",
-    done: "bg-emerald-500/20 text-emerald-400",
-    duplicate: "bg-orange-500/20 text-orange-400",
-    error: "bg-red-500/20 text-red-400",
-    needs_retry: "bg-rose-500/20 text-rose-400",
-    retrying: "bg-blue-500/20 text-blue-400 animate-pulse",
+    pending: "bg-amber-100 text-amber-700",
+    processing: "bg-blue-100 text-blue-700 animate-pulse",
+    done: "bg-emerald-100 text-emerald-700",
+    duplicate: "bg-orange-100 text-orange-700",
+    error: "bg-red-100 text-red-700",
+    needs_retry: "bg-rose-100 text-rose-700",
+    retrying: "bg-blue-100 text-blue-700 animate-pulse",
   };
-  return classes[status] || "bg-slate-500/20 text-slate-400";
+  return classes[status] || "bg-gray-100 text-gray-600";
 };
 
 const getScoreClasses = (score) => {
-  if (score === 3) return "bg-emerald-500/20 text-emerald-400";
-  if (score === 2) return "bg-amber-500/20 text-amber-400";
-  if (score === 1) return "bg-red-500/20 text-red-400";
-  return "bg-slate-500/20 text-slate-400";
+  if (score === 3) return "bg-emerald-100 text-emerald-700";
+  if (score === 2) return "bg-amber-100 text-amber-700";
+  if (score === 1) return "bg-red-100 text-red-700";
+  return "bg-gray-100 text-gray-600";
 };
 
 const formatTime = (milliseconds) => {
@@ -1354,11 +1447,6 @@ const processAll = async () => {
   const overallStartTime = performance.now();
 
   const pendingFiles = files.value.filter((f) => f.status === "pending");
-  // Each batch is sent as ONE multipart request to /upload-batch, which forwards
-  // all 10 images to gemini-3.5-flash in a SINGLE generate_content call.
-  // gemini-3.5-flash is capped at 5 RPM on the free tier, so we track each
-  // batch as 1 against the batchLimit bucket and stop early if the budget
-  // would be exceeded; the user can resume after the cooldown timer hits zero.
   const BATCH_SIZE = 10;
   let stoppedForCooldown = false;
 
@@ -1421,8 +1509,6 @@ const processAll = async () => {
       console.error("Error processing batch:", error);
       const batchEnd = performance.now();
       const perFileTime = (batchEnd - batchStart) / batch.length;
-      // Roll back files that never got a status update so they can be
-      // retried later (instead of being stuck "processing").
       batch.forEach((fileItem) => {
         fileItem.processingTime = perFileTime;
         if (fileItem.status === "processing") {
@@ -1437,8 +1523,6 @@ const processAll = async () => {
   processing.value = false;
 
   if (stoppedForCooldown) {
-    // Files we never reached are still "pending" - the user can click
-    // "Process All Files" again once the batch cooldown timer hits zero.
     console.info(
       `Process All stopped early: batch rate limit reached. ` +
         `Resume in ${batchLimit.label.value}.`,
@@ -1448,7 +1532,6 @@ const processAll = async () => {
 
 const downloadExcel = async () => {
   try {
-    // Collect all processed files' editable data (excluding score)
     const filesData = files.value
       .filter((f) => f.status === "done")
       .map((f) => ({
@@ -1461,7 +1544,6 @@ const downloadExcel = async () => {
         itbis: f.editableData.itbis || "0",
         selectivo: f.editableData.selectivo || "0",
         metodo_de_pago: f.editableData.metodo_de_pago || "",
-        // Score is intentionally excluded
       }));
 
     const response = await fetch(`${API_BASE}/download`, {
@@ -1483,12 +1565,13 @@ const downloadExcel = async () => {
     document.body.removeChild(a);
   } catch (error) {
     console.error("Error downloading file:", error);
-    alert("Error downloading Excel file");
+    alert("Error al descargar el archivo Excel");
   }
 };
 
 const clearFiles = () => {
   files.value = [];
+  sourceDocuments.value = [];
   totalProcessingTime.value = 0;
   if (fileInput.value) {
     fileInput.value.value = "";
@@ -1497,16 +1580,6 @@ const clearFiles = () => {
 </script>
 
 <style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
 .slide-enter-active,
 .slide-leave-active {
   transition: transform 0.3s ease;

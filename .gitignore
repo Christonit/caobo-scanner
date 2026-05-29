@@ -27,3 +27,8 @@ python_backend/template_converted.xlsx
 # Environment
 .env
 .env.local
+
+# Supabase
+supabase/.branches
+supabase/.temp
+supabase/.env

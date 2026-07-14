@@ -22,6 +22,7 @@ python_backend/venv/
 python_backend/env/
 python_backend/history.json
 python_backend/output.xlsx
+python_backend/output.xls
 python_backend/template_converted.xlsx
 
 # Environment
@@ -32,3 +33,6 @@ python_backend/template_converted.xlsx
 supabase/.branches
 supabase/.temp
 supabase/.env
+
+
+bucket

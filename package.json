@@ -20,10 +20,9 @@
     "nuxt": "latest"
   },
   "dependencies": {
-    "@pinia/nuxt": "latest",
     "@supabase/supabase-js": "^2.106.2",
     "pdfjs-dist": "^5.7.284",
-    "pinia": "latest",
-    "skills": "^1.5.9"
+    "skills": "^1.5.9",
+    "xlsx": "^0.18.5"
   }
 }

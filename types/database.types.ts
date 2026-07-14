@@ -4,6 +4,12 @@
 //
 //   supabase gen types typescript --linked > types/database.types.ts
 
+// A single column/field definition stored inside `templates.fields` (jsonb).
+export type TemplateField = {
+  name: string;
+  description: string;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -79,6 +85,91 @@ export type Database = {
           tax_payer_id?: string | null;
           email?: string | null;
           notes?: string | null;
+          deleted_at?: string | null;
+        };
+      };
+      client_documents: {
+        Row: {
+          id: string;
+          client_id: string;
+          document_name: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          client_id: string;
+          document_name: string;
+        };
+        Update: {
+          document_name?: string;
+        };
+      };
+      document_attributes: {
+        Row: {
+          id: number;
+          client_document_id: string;
+          document_type: string;
+          document_id: number | null;
+          description: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          client_document_id: string;
+          document_type: string;
+          document_id?: number | null;
+          description?: string | null;
+        };
+        Update: {
+          document_type?: string;
+          document_id?: number | null;
+          description?: string | null;
+        };
+      };
+      templates: {
+        Row: {
+          id: string;
+          // Templates are intentionally NOT tied to an organization or
+          // client — they are reusable extraction definitions. The column
+          // exists in the DB but is nullable and left unset by the app.
+          organization_id: string | null;
+          created_by: string | null;
+          name: string;
+          description: string | null;
+          is_system: boolean;
+          document_type: string;
+          // Ordered list of columns the extractor should produce.
+          fields: TemplateField[];
+          ai_instructions: string | null;
+          ai_model: string | null;
+          reference_file_url: string | null;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id?: string | null;
+          created_by?: string | null;
+          name: string;
+          description?: string | null;
+          is_system?: boolean;
+          document_type?: string;
+          fields: TemplateField[];
+          ai_instructions?: string | null;
+          ai_model?: string | null;
+          reference_file_url?: string | null;
+          deleted_at?: string | null;
+        };
+        Update: {
+          name?: string;
+          description?: string | null;
+          document_type?: string;
+          fields?: TemplateField[];
+          ai_instructions?: string | null;
+          ai_model?: string | null;
+          reference_file_url?: string | null;
           deleted_at?: string | null;
         };
       };

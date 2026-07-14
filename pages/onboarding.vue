@@ -20,7 +20,7 @@ if (membership.value) {
 }
 
 async function createOrg() {
-  if (!user.value) return;
+  if (!user.value?.sub) return;
   error.value = null;
   loading.value = true;
 

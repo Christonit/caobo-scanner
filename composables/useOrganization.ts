@@ -27,7 +27,9 @@ export const useOrganization = () => {
   const isAdmin = computed(() => role.value === "admin");
 
   async function refresh() {
-    if (!user.value) {
+    // @nuxtjs/supabase v2: useSupabaseUser() is JWT claims; user id is `sub`.
+    const userId = user.value?.sub;
+    if (!userId) {
       membership.value = null;
       return;
     }
@@ -36,7 +38,7 @@ export const useOrganization = () => {
       .select(
         "organization_id, role, full_name, organization:organization_id ( id, name, slug )"
       )
-      .eq("id", user.value.id)
+      .eq("id", userId)
       .maybeSingle();
 
     if (error) {

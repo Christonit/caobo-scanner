@@ -7,7 +7,7 @@ const user = useSupabaseUser();
 const { activeOrg, refresh } = useOrganization();
 
 watchEffect(async () => {
-  if (features.auth && user.value) await refresh();
+  if (features.auth && user.value?.sub) await refresh();
 });
 
 // Routes that render the bare slot (no sidebar). Login/signup already opt out
@@ -21,7 +21,7 @@ const BARE_ROUTES = new Set(["/onboarding"]);
 // can't make the whole sidebar disappear.
 const showShell = computed(() => {
   if (BARE_ROUTES.has(route.path)) return false;
-  return features.auth ? Boolean(user.value) : true;
+  return features.auth ? Boolean(user.value?.sub) : true;
 });
 
 async function signOut() {
@@ -36,6 +36,11 @@ const nav = [
   { to: "/clientes", label: "Clientes", icon: "users" },
   { to: "/plantillas", label: "Plantillas", icon: "template" },
 ];
+
+function isNavActive(to: string) {
+  if (to === "/") return route.path === "/";
+  return route.path === to || route.path.startsWith(`${to}/`);
+}
 
 const displayName = computed(() => {
   const meta = user.value?.user_metadata as { full_name?: string } | undefined;
@@ -101,7 +106,7 @@ const userInitials = computed(() =>
               :to="item.to"
               class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition"
               :class="
-                route.path === item.to
+                isNavActive(item.to)
                   ? 'bg-emerald-50 text-emerald-700'
                   : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
               "
@@ -109,7 +114,7 @@ const userInitials = computed(() =>
               <span
                 class="flex h-5 w-5 items-center justify-center"
                 :class="
-                  route.path === item.to
+                  isNavActive(item.to)
                     ? 'text-emerald-600'
                     : 'text-gray-400 group-hover:text-gray-600'
                 "
@@ -194,8 +199,47 @@ const userInitials = computed(() =>
             </NuxtLink>
           </nav>
 
-          <!-- Logged-in user + sign out -->
+          <!-- Settings + logged-in user + sign out -->
           <div class="border-t border-gray-200 p-3">
+            <NuxtLink
+              to="/settings"
+              class="group mb-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition"
+              :class="
+                route.path === '/settings'
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+              "
+            >
+              <span
+                class="flex h-5 w-5 items-center justify-center"
+                :class="
+                  route.path === '/settings'
+                    ? 'text-emerald-600'
+                    : 'text-gray-400 group-hover:text-gray-600'
+                "
+              >
+                <svg
+                  class="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                  />
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
+                </svg>
+              </span>
+              Configuración
+            </NuxtLink>
             <div class="flex items-center gap-3 px-1 py-1.5">
               <span
                 class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gray-200 text-xs font-semibold text-gray-600"

@@ -12,7 +12,8 @@ const error = ref<string | null>(null);
 const loading = ref(false);
 
 watchEffect(() => {
-  if (user.value) {
+  // JWT claims from useSupabaseUser() — signed-in when `sub` is present.
+  if (user.value?.sub) {
     const redirect =
       typeof route.query.redirect === "string" ? route.query.redirect : "/";
     router.replace(redirect);

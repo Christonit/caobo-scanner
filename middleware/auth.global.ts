@@ -45,7 +45,10 @@ export default defineNuxtRouteMiddleware(async (to) => {
 
   const user = useSupabaseUser();
 
-  if (!user.value) {
+  // @nuxtjs/supabase v2 populates useSupabaseUser() with JWT claims
+  // (auth.getClaims()), not the legacy User object — the auth user id is `sub`.
+  const userId = user.value?.sub;
+  if (!userId) {
     if (ALWAYS_PUBLIC.has(to.path)) return;
     return navigateTo({
       path: "/login",
@@ -59,7 +62,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const { data, error } = await supabase
     .from("user_profiles")
     .select("organization_id")
-    .eq("id", user.value.id)
+    .eq("id", userId)
     .maybeSingle();
 
   if (error) {

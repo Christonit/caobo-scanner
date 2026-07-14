@@ -37,9 +37,173 @@
           </a>
         </header>
 
+        <!-- Client + ERP catalog selection (mandatory before scanning) -->
+        <section
+          class="mb-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+        >
+          <div class="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 class="text-base font-semibold text-gray-900">Cliente</h2>
+              <p class="mt-0.5 text-sm text-gray-500">
+                Selecciona el cliente y los documentos de ERP que se usarán
+                para clasificar Concepto Id y Tipo de Pago Id.
+              </p>
+            </div>
+            <span
+              v-if="canScan"
+              class="flex-shrink-0 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700"
+            >
+              Listo para escanear
+            </span>
+            <span
+              v-else
+              class="flex-shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700"
+            >
+              Selección requerida
+            </span>
+          </div>
+
+          <p
+            v-if="clientsError"
+            class="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          >
+            {{ clientsError }}
+          </p>
+
+          <div class="grid gap-4 sm:grid-cols-3">
+            <div>
+              <label
+                for="client-select"
+                class="mb-1.5 block text-sm font-medium text-gray-700"
+              >
+                Cliente <span class="text-rose-500">*</span>
+              </label>
+              <select
+                id="client-select"
+                v-model="selectedClientId"
+                @change="onClientChange"
+                :disabled="clientsLoading"
+                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
+              >
+                <option value="">
+                  {{ clientsLoading ? "Cargando…" : "Selecciona un cliente" }}
+                </option>
+                <option
+                  v-for="client in clients"
+                  :key="client.id"
+                  :value="client.id"
+                >
+                  {{ client.name }}
+                </option>
+              </select>
+              <p
+                v-if="!clientsLoading && clients.length === 0"
+                class="mt-1.5 text-xs text-gray-400"
+              >
+                No hay clientes.
+                <NuxtLink to="/clientes" class="text-emerald-700 hover:underline"
+                  >Crea uno primero</NuxtLink
+                >.
+              </p>
+            </div>
+
+            <div>
+              <label
+                for="concepto-doc-select"
+                class="mb-1.5 block text-sm font-medium text-gray-700"
+              >
+                Documento para Concepto Id <span class="text-rose-500">*</span>
+              </label>
+              <select
+                id="concepto-doc-select"
+                v-model="selectedConceptoDocId"
+                :disabled="!selectedClientId || clientDocumentsLoading"
+                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
+              >
+                <option value="">
+                  {{
+                    clientDocumentsLoading
+                      ? "Cargando…"
+                      : "Selecciona un documento"
+                  }}
+                </option>
+                <option v-for="doc in clientDocuments" :key="doc.id" :value="doc.id">
+                  {{ doc.document_name }} ({{ doc.document_attributes.length }}
+                  atributos)
+                </option>
+              </select>
+              <p
+                v-if="
+                  selectedClientId &&
+                  !clientDocumentsLoading &&
+                  clientDocuments.length === 0
+                "
+                class="mt-1.5 text-xs text-gray-400"
+              >
+                Este cliente no tiene documentos.
+                <NuxtLink
+                  :to="`/clientes/${selectedClientId}`"
+                  class="text-emerald-700 hover:underline"
+                  >Crea uno primero</NuxtLink
+                >.
+              </p>
+            </div>
+
+            <div>
+              <label
+                for="tipo-de-pago-doc-select"
+                class="mb-1.5 block text-sm font-medium text-gray-700"
+              >
+                Documento para Tipo de Pago Id
+                <span class="text-rose-500">*</span>
+              </label>
+              <select
+                id="tipo-de-pago-doc-select"
+                v-model="selectedTipoDePagoDocId"
+                :disabled="!selectedClientId || clientDocumentsLoading"
+                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
+              >
+                <option value="">
+                  {{
+                    clientDocumentsLoading
+                      ? "Cargando…"
+                      : "Selecciona un documento"
+                  }}
+                </option>
+                <option v-for="doc in clientDocuments" :key="doc.id" :value="doc.id">
+                  {{ doc.document_name }} ({{ doc.document_attributes.length }}
+                  atributos)
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <p
+            v-if="!canScan"
+            class="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800"
+          >
+            <svg
+              class="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            Selecciona un cliente y sus documentos de Concepto Id / Tipo de
+            Pago Id antes de subir o procesar archivos.
+          </p>
+        </section>
+
         <!-- Add files card -->
         <section
           class="rounded-xl border border-gray-200 bg-white shadow-sm"
+          :class="{ 'pointer-events-none opacity-50': !canScan }"
         >
           <button
             type="button"
@@ -92,13 +256,14 @@
               @drop="handleDrop"
               @dragover.prevent
               @dragenter.prevent
-              @click="fileInput?.click()"
+              @click="canScan && fileInput?.click()"
             >
               <input
                 ref="fileInput"
                 type="file"
                 multiple
                 accept=".pdf,.png,.jpg,.jpeg"
+                :disabled="!canScan"
                 @change="handleFileSelect"
                 class="hidden"
               />
@@ -124,8 +289,8 @@
               </p>
               <p class="mt-1 text-xs text-gray-400">
                 Tipos soportados: pdf, png, jpg, jpeg · Máx
-                {{ MAX_FILE_SIZE_LABEL }} por archivo · los PDF se dividen en una
-                fila por página
+                {{ MAX_FILE_SIZE_LABEL }} por archivo · los PDF se dividen en
+                una fila por página
               </p>
               <p
                 v-if="splittingPdfs > 0"
@@ -309,12 +474,29 @@
                       </span>
                       <span v-else class="text-gray-300">-</span>
                     </td>
+                    <!-- Nombre -->
+                    <td class="px-4 py-2.5">
+                      <input
+                        type="text"
+                        v-model="file.editableData.nombre"
+                        maxlength="255"
+                        @focus="startEditing(file)"
+                        class="w-36 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                        placeholder="-"
+                      />
+                    </td>
                     <!-- Documento -->
                     <td class="px-4 py-2.5">
                       <input
                         type="text"
-                        v-model="file.editableData.documento"
+                        inputmode="numeric"
+                        :value="file.editableData.documento"
                         @focus="startEditing(file)"
+                        @input="
+                          file.editableData.documento = String(
+                            $event.target.value || '',
+                          ).replace(/\D/g, '')
+                        "
                         class="w-28 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
                         placeholder="-"
                       />
@@ -329,33 +511,91 @@
                         placeholder="-"
                       />
                     </td>
-                    <!-- Tipo de Suplidor -->
+                    <!-- NCF Afectado -->
                     <td class="px-4 py-2.5">
                       <input
                         type="text"
+                        v-model="file.editableData.ncf_afectado"
+                        maxlength="11"
+                        @focus="startEditing(file)"
+                        class="w-28 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                        :class="{
+                          'ring-1 ring-amber-400': requiresNcfAfectado(
+                            file.editableData.ncf,
+                          ) && !file.editableData.ncf_afectado,
+                        }"
+                        placeholder="-"
+                        :title="
+                          requiresNcfAfectado(file.editableData.ncf)
+                            ? 'Obligatorio cuando NCF es B03 o B04'
+                            : ''
+                        "
+                      />
+                    </td>
+                    <!-- Tipo de Suplidor -->
+                    <td class="px-4 py-2.5">
+                      <select
                         v-model="file.editableData.tipo_de_suplidor"
                         @focus="startEditing(file)"
-                        class="w-28 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                        placeholder="-"
-                      />
+                        class="w-36 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      >
+                        <option value="">-</option>
+                        <option
+                          v-if="
+                            file.editableData.tipo_de_suplidor &&
+                            !TIPO_DE_SUPLIDOR_OPTIONS.includes(
+                              file.editableData.tipo_de_suplidor,
+                            )
+                          "
+                          :value="file.editableData.tipo_de_suplidor"
+                        >
+                          {{ file.editableData.tipo_de_suplidor }}
+                        </option>
+                        <option
+                          v-for="opt in TIPO_DE_SUPLIDOR_OPTIONS"
+                          :key="opt"
+                          :value="opt"
+                        >
+                          {{ opt }}
+                        </option>
+                      </select>
                     </td>
                     <!-- Tipo de Gasto -->
                     <td class="px-4 py-2.5">
-                      <input
-                        type="text"
+                      <select
                         v-model="file.editableData.tipo_de_gasto"
                         @focus="startEditing(file)"
-                        class="w-64 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                        placeholder="-"
-                      />
+                        class="w-64 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      >
+                        <option value="">-</option>
+                        <option
+                          v-if="
+                            file.editableData.tipo_de_gasto &&
+                            !TIPO_DE_GASTO_OPTIONS.includes(
+                              file.editableData.tipo_de_gasto,
+                            )
+                          "
+                          :value="file.editableData.tipo_de_gasto"
+                        >
+                          {{ file.editableData.tipo_de_gasto }}
+                        </option>
+                        <option
+                          v-for="opt in TIPO_DE_GASTO_OPTIONS"
+                          :key="opt"
+                          :value="opt"
+                        >
+                          {{ opt }}
+                        </option>
+                      </select>
                     </td>
                     <!-- Descripción -->
                     <td class="px-4 py-2.5">
                       <input
                         type="text"
                         v-model="file.editableData.descripcion"
+                        maxlength="200"
                         @focus="startEditing(file)"
-                        class="w-28 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                        class="w-36 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
                         placeholder="-"
                       />
                     </td>
@@ -365,9 +605,28 @@
                         type="text"
                         v-model="file.editableData.fecha"
                         @focus="startEditing(file)"
+                        @blur="
+                          file.editableData.fecha = normalizeFecha(
+                            file.editableData.fecha,
+                          )
+                        "
                         class="w-24 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                        placeholder="-"
+                        placeholder="DD/MM/AAAA"
                       />
+                    </td>
+                    <!-- Monto en Servicios -->
+                    <td class="px-4 py-2.5">
+                      <div class="flex items-center">
+                        <span class="mr-1 text-sm text-gray-400">$</span>
+                        <input
+                          type="text"
+                          inputmode="decimal"
+                          v-model="file.editableData.monto_en_servicios"
+                          @focus="startEditing(file)"
+                          class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-700 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                          placeholder="0"
+                        />
+                      </div>
                     </td>
                     <!-- Monto en Bienes -->
                     <td class="px-4 py-2.5">
@@ -375,10 +634,11 @@
                         <span class="mr-1 text-sm text-gray-400">$</span>
                         <input
                           type="text"
+                          inputmode="decimal"
                           v-model="file.editableData.monto_en_bienes"
                           @focus="startEditing(file)"
                           class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-700 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                          placeholder="-"
+                          placeholder="0"
                         />
                       </div>
                     </td>
@@ -408,6 +668,16 @@
                         />
                       </div>
                     </td>
+                    <!-- Moneda -->
+                    <td class="px-4 py-2.5">
+                      <input
+                        type="text"
+                        v-model="file.editableData.moneda"
+                        @focus="startEditing(file)"
+                        class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm uppercase text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                        placeholder="-"
+                      />
+                    </td>
                     <!-- Forma de Pago -->
                     <td class="px-4 py-2.5">
                       <input
@@ -417,6 +687,62 @@
                         class="w-40 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
                         placeholder="-"
                       />
+                    </td>
+                    <!-- Concepto Id -->
+                    <td class="px-4 py-2.5">
+                      <select
+                        v-model="file.editableData.concepto_id"
+                        @focus="startEditing(file)"
+                        class="w-48 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      >
+                        <option :value="null">-</option>
+                        <option
+                          v-if="
+                            file.editableData.concepto_id !== null &&
+                            !conceptoOptions.some(
+                              (o) => o.document_id === file.editableData.concepto_id,
+                            )
+                          "
+                          :value="file.editableData.concepto_id"
+                        >
+                          Id {{ file.editableData.concepto_id }} (fuera de catálogo)
+                        </option>
+                        <option
+                          v-for="opt in conceptoOptions"
+                          :key="opt.id"
+                          :value="opt.document_id"
+                        >
+                          {{ opt.document_type }} ({{ opt.document_id }})
+                        </option>
+                      </select>
+                    </td>
+                    <!-- Tipo de Pago Id -->
+                    <td class="px-4 py-2.5">
+                      <select
+                        v-model="file.editableData.tipo_de_pago_id"
+                        @focus="startEditing(file)"
+                        class="w-48 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      >
+                        <option :value="null">-</option>
+                        <option
+                          v-if="
+                            file.editableData.tipo_de_pago_id !== null &&
+                            !tipoDePagoOptions.some(
+                              (o) => o.document_id === file.editableData.tipo_de_pago_id,
+                            )
+                          "
+                          :value="file.editableData.tipo_de_pago_id"
+                        >
+                          Id {{ file.editableData.tipo_de_pago_id }} (fuera de catálogo)
+                        </option>
+                        <option
+                          v-for="opt in tipoDePagoOptions"
+                          :key="opt.id"
+                          :value="opt.document_id"
+                        >
+                          {{ opt.document_type }} ({{ opt.document_id }})
+                        </option>
+                      </select>
                     </td>
                     <!-- Preview Button -->
                     <td class="px-4 py-2.5 text-center">
@@ -556,18 +882,40 @@
       </div>
 
       <!-- Data sources side panel -->
-      <aside
-        v-if="files.length > 0"
-        class="hidden w-72 flex-shrink-0 lg:block"
-      >
+      <aside v-if="files.length > 0" class="hidden w-72 flex-shrink-0 lg:block">
         <div class="sticky top-8 space-y-4">
-        <h2 class="text-sm font-semibold text-gray-900">Data sources</h2>
+          <h2 class="text-sm font-semibold text-gray-900">Data sources</h2>
 
-        <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
           <div
-            class="flex items-center justify-between px-4 py-3 text-sm text-gray-700"
+            class="overflow-hidden rounded-xl border border-gray-200 bg-white"
           >
-            <span class="flex items-center gap-2">
+            <div
+              class="flex items-center justify-between px-4 py-3 text-sm text-gray-700"
+            >
+              <span class="flex items-center gap-2">
+                <svg
+                  class="h-4 w-4 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                    d="M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1zm7 0v5h5"
+                  />
+                </svg>
+                {{ sourceDocuments.length }}
+                {{ sourceDocuments.length === 1 ? "Archivo" : "Archivos" }}
+              </span>
+              <span class="font-medium text-gray-500">{{
+                formatBytes(totalSourceSize)
+              }}</span>
+            </div>
+            <div
+              class="flex items-center gap-2 border-t border-gray-100 px-4 py-3 text-sm text-gray-700"
+            >
               <svg
                 class="h-4 w-4 text-gray-400"
                 fill="none"
@@ -578,108 +926,89 @@
                   stroke-linecap="round"
                   stroke-linejoin="round"
                   stroke-width="1.8"
-                  d="M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1zm7 0v5h5"
+                  d="M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.5-2.5 2.5-15 0-18m0 18c-2.5-2.5-2.5-15 0-18M3 12h18"
                 />
               </svg>
-              {{ sourceDocuments.length }}
-              {{ sourceDocuments.length === 1 ? "Archivo" : "Archivos" }}
-            </span>
-            <span class="font-medium text-gray-500">{{
-              formatBytes(totalSourceSize)
-            }}</span>
+              {{ files.length }} entradas escaneadas
+            </div>
           </div>
+
+          <!-- Multipage breakdown -->
           <div
-            class="flex items-center gap-2 border-t border-gray-100 px-4 py-3 text-sm text-gray-700"
+            v-if="multipageDocuments.length"
+            class="rounded-xl border border-gray-200 bg-white px-4 py-3"
           >
-            <svg
-              class="h-4 w-4 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.8"
-                d="M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.5-2.5 2.5-15 0-18m0 18c-2.5-2.5-2.5-15 0-18M3 12h18"
-              />
-            </svg>
-            {{ files.length }} entradas escaneadas
-          </div>
-        </div>
-
-        <!-- Multipage breakdown -->
-        <div
-          v-if="multipageDocuments.length"
-          class="rounded-xl border border-gray-200 bg-white px-4 py-3"
-        >
-          <p class="mb-2 text-xs font-medium text-gray-400">
-            Documentos multipágina
-          </p>
-          <ul class="space-y-1.5">
-            <li
-              v-for="doc in multipageDocuments"
-              :key="doc.id"
-              class="flex items-center justify-between gap-2 text-xs text-gray-600"
-            >
-              <span class="truncate">{{ doc.name }}</span>
-              <span
-                class="flex-shrink-0 rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-500"
-                >{{ doc.pages }} entradas</span
+            <p class="mb-2 text-xs font-medium text-gray-400">
+              Documentos multipágina
+            </p>
+            <ul class="space-y-1.5">
+              <li
+                v-for="doc in multipageDocuments"
+                :key="doc.id"
+                class="flex items-center justify-between gap-2 text-xs text-gray-600"
               >
-            </li>
-          </ul>
-        </div>
+                <span class="truncate">{{ doc.name }}</span>
+                <span
+                  class="flex-shrink-0 rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-500"
+                  >{{ doc.pages }} entradas</span
+                >
+              </li>
+            </ul>
+          </div>
 
-        <!-- Actions -->
-        <div class="space-y-2 rounded-xl border border-gray-200 bg-white p-3">
-          <button
-            @click="processAll"
-            :disabled="
-              processing ||
-              batchLimit.isLimited.value ||
-              files.every((f) => f.status !== 'pending')
-            "
-            class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-            :title="
-              batchLimit.isLimited.value
-                ? `Límite alcanzado - espera ${batchLimit.label.value}`
-                : 'Procesar archivos pendientes con IA'
-            "
-          >
-            <template v-if="processing">Procesando...</template>
-            <template v-else-if="batchLimit.isLimited.value">
-              Enfriamiento · {{ batchLimit.label.value }}
-            </template>
-            <template v-else>Procesar</template>
-          </button>
-          <button
-            @click="fileInput?.click()"
-            class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
-          >
-            Cargar más documentos
-          </button>
-          <button
-            @click="clearFiles"
-            class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
-          >
-            Descartar todos
-          </button>
-          <button
-            v-if="files.some((f) => f.status === 'done')"
-            @click="downloadExcel"
-            class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
-          >
-            Descargar Excel
-          </button>
-        </div>
+          <!-- Actions -->
+          <div class="space-y-2 rounded-xl border border-gray-200 bg-white p-3">
+            <button
+              @click="processAll"
+              :disabled="
+                !canScan ||
+                processing ||
+                batchLimit.isLimited.value ||
+                files.every((f) => f.status !== 'pending')
+              "
+              class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+              :title="
+                !canScan
+                  ? 'Selecciona cliente y documentos primero'
+                  : batchLimit.isLimited.value
+                    ? `Límite alcanzado - espera ${batchLimit.label.value}`
+                    : 'Procesar archivos pendientes con IA'
+              "
+            >
+              <template v-if="processing">Procesando...</template>
+              <template v-else-if="batchLimit.isLimited.value">
+                Enfriamiento · {{ batchLimit.label.value }}
+              </template>
+              <template v-else>Procesar</template>
+            </button>
+            <button
+              @click="canScan && fileInput?.click()"
+              :disabled="!canScan"
+              class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cargar más documentos
+            </button>
+            <button
+              @click="clearFiles"
+              class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
+            >
+              Descartar todos
+            </button>
+            <button
+              v-if="files.some((f) => f.status === 'done')"
+              @click="downloadExcel"
+              class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+            >
+              Descargar Excel
+            </button>
+          </div>
 
-        <p
-          v-if="totalProcessingTime > 0"
-          class="text-center text-xs text-gray-400"
-        >
-          Tiempo total: {{ formatTime(totalProcessingTime) }}
-        </p>
+          <p
+            v-if="totalProcessingTime > 0"
+            class="text-center text-xs text-gray-400"
+          >
+            Tiempo total: {{ formatTime(totalProcessingTime) }}
+          </p>
         </div>
       </aside>
     </div>
@@ -740,6 +1069,8 @@
               :src="previewUrl"
               :alt="previewFile.name"
               class="h-auto w-full object-contain"
+              @load="onPreviewImageLoad"
+              @error="onPreviewImageError"
             />
           </div>
 
@@ -771,10 +1102,96 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, markRaw } from "vue";
 
-const config = useRuntimeConfig();
-const API_BASE = config.public.apiBase;
+const API_BASE = useApiBase();
+
+// --- Client + ERP catalog selection (mandatory before scanning) ----------
+const { list: listClients } = useClients();
+const { listByClient } = useClientDocuments();
+
+const clients = ref([]);
+const clientsLoading = ref(false);
+const clientsError = ref(null);
+
+const selectedClientId = ref("");
+const selectedConceptoDocId = ref("");
+const selectedTipoDePagoDocId = ref("");
+
+const clientDocuments = ref([]);
+const clientDocumentsLoading = ref(false);
+const clientDocumentsError = ref(null);
+
+const canScan = computed(() =>
+  Boolean(
+    selectedClientId.value &&
+      selectedConceptoDocId.value &&
+      selectedTipoDePagoDocId.value,
+  ),
+);
+
+// Only attributes with a usable ERP id can be written to the export.
+const conceptoOptions = computed(() => {
+  const doc = clientDocuments.value.find(
+    (d) => d.id === selectedConceptoDocId.value,
+  );
+  return (doc?.document_attributes ?? []).filter(
+    (a) => a.document_id !== null && a.document_id !== undefined,
+  );
+});
+const tipoDePagoOptions = computed(() => {
+  const doc = clientDocuments.value.find(
+    (d) => d.id === selectedTipoDePagoDocId.value,
+  );
+  return (doc?.document_attributes ?? []).filter(
+    (a) => a.document_id !== null && a.document_id !== undefined,
+  );
+});
+
+const conceptoCatalogPayload = computed(() =>
+  conceptoOptions.value.map((a) => ({
+    document_type: a.document_type,
+    document_id: a.document_id,
+    description: a.description || "",
+  })),
+);
+const tipoDePagoCatalogPayload = computed(() =>
+  tipoDePagoOptions.value.map((a) => ({
+    document_type: a.document_type,
+    document_id: a.document_id,
+    description: a.description || "",
+  })),
+);
+
+const loadClients = async () => {
+  clientsLoading.value = true;
+  clientsError.value = null;
+  try {
+    clients.value = await listClients();
+  } catch (err) {
+    clientsError.value = err?.message || "No se pudieron cargar los clientes.";
+  } finally {
+    clientsLoading.value = false;
+  }
+};
+
+const onClientChange = async () => {
+  selectedConceptoDocId.value = "";
+  selectedTipoDePagoDocId.value = "";
+  clientDocuments.value = [];
+  if (!selectedClientId.value) return;
+
+  clientDocumentsLoading.value = true;
+  clientDocumentsError.value = null;
+  try {
+    clientDocuments.value = await listByClient(selectedClientId.value);
+  } catch (err) {
+    clientDocumentsError.value =
+      err?.message || "No se pudieron cargar los documentos del cliente.";
+  } finally {
+    clientDocumentsLoading.value = false;
+  }
+};
 
 // --- UI state -------------------------------------------------------------
 const addFilesOpen = ref(true);
@@ -786,19 +1203,67 @@ const columns = [
   "Status",
   "Score",
   "Processing Time",
+  "Nombre",
   "Documento",
   "NCF",
+  "NCF Afectado",
   "Tipo de Suplidor",
   "Tipo de Gasto",
   "Descripción",
   "Fecha",
+  "Monto Servicios",
   "Monto Bienes",
   "ITBIS",
   "Selectivo",
+  "Moneda",
   "Forma de Pago",
+  "Concepto Id",
+  "Tipo de Pago Id",
   "Preview",
   "Acciones",
 ];
+
+const TIPO_DE_SUPLIDOR_OPTIONS = [
+  "Gasto Formal",
+  "Gasto Informal",
+  "Genérico",
+  "Gasto Menor",
+  "Pagos al exterior",
+  "Norma 07-2007",
+  "DGA",
+  "Decreto 139-98",
+];
+
+const TIPO_DE_GASTO_OPTIONS = [
+  "01-Gasto de personal",
+  "02-Gastos por trabajos, servicios y suministros",
+  "03-Arrendamientos",
+  "04-Gastos de activo fijo",
+  "05-Gastos de representación",
+  "06-Otras deducciones administrativas",
+  "07-Gastos financieros",
+  "08-Gastos extraordinarios",
+  "09-Compras y gastos que forman gastos de la venta",
+  "10-Adquisicion de activos",
+  "11-Gastos de seguros",
+];
+
+const requiresNcfAfectado = (ncf) => {
+  const value = String(ncf || "")
+    .trim()
+    .toUpperCase();
+  return value.startsWith("B03") || value.startsWith("B04");
+};
+
+const normalizeFecha = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const match = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (!match) return text;
+  let [, day, month, year] = match;
+  if (year.length === 2) year = `20${year}`;
+  return `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${year}`;
+};
 
 // --- Upload limits --------------------------------------------------------
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -810,10 +1275,49 @@ const MAX_FILE_SIZE_LABEL = "10MB";
 const PDF_RENDER_SCALE = 2.0; // ~144 DPI - good for OCR, reasonable file size
 let pdfjsLibPromise = null;
 
+// pdf.js >= 5.4 calls Uint8Array.prototype.toHex() for document fingerprints.
+// That API only exists in Chromium 140+ / Safari 18.2+ / Firefox 133+.
+// pdf.js >= 5.6 also needs Map.prototype.getOrInsertComputed (Chromium 135+).
+const ensurePdfJsRuntimePolyfills = () => {
+  if (
+    typeof Uint8Array !== "undefined" &&
+    typeof Uint8Array.prototype.toHex !== "function"
+  ) {
+    Object.defineProperty(Uint8Array.prototype, "toHex", {
+      value() {
+        const hex = new Array(this.length);
+        for (let i = 0; i < this.length; i++) {
+          hex[i] = this[i].toString(16).padStart(2, "0");
+        }
+        return hex.join("");
+      },
+      writable: true,
+      configurable: true,
+    });
+  }
+
+  if (
+    typeof Map !== "undefined" &&
+    typeof Map.prototype.getOrInsertComputed !== "function"
+  ) {
+    Object.defineProperty(Map.prototype, "getOrInsertComputed", {
+      value(key, callbackFn) {
+        if (this.has(key)) return this.get(key);
+        const value = callbackFn(key);
+        this.set(key, value);
+        return value;
+      },
+      writable: true,
+      configurable: true,
+    });
+  }
+};
+
 const loadPdfJs = async () => {
   if (typeof window === "undefined") return null;
   if (!pdfjsLibPromise) {
     pdfjsLibPromise = (async () => {
+      ensurePdfJsRuntimePolyfills();
       const pdfjs = await import("pdfjs-dist");
       // pdfjs-dist v4+ ships an .mjs worker. Use the bundled URL so it works
       // with Vite/Nuxt without manual asset copying.
@@ -834,12 +1338,28 @@ const loadPdfJs = async () => {
 // Convert a single PDF File into an array of per-page PNG Files. Throws on
 // failure so the caller can decide to fall back to uploading the PDF as-is.
 const splitPdfIntoPageFiles = async (pdfFile) => {
+  console.log(
+    `[PDF Split] Starting split for "${pdfFile.name}" (${pdfFile.size} bytes)`,
+  );
+
   const pdfjs = await loadPdfJs();
   if (!pdfjs) throw new Error("pdfjs-dist unavailable in this environment");
 
   const arrayBuffer = await pdfFile.arrayBuffer();
-  const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
+  // Decoder assets (wasm/cmaps/fonts) are required for scanned PDFs that use
+  // JBIG2/JPEG2000. Without them, pages render as blank white images.
+  const loadingTask = pdfjs.getDocument({
+    data: arrayBuffer,
+    wasmUrl: "/api/pdfjs/wasm/",
+    cMapUrl: "/api/pdfjs/cmaps/",
+    cMapPacked: true,
+    standardFontDataUrl: "/api/pdfjs/standard_fonts/",
+  });
   const pdf = await loadingTask.promise;
+
+  console.log(
+    `[PDF Split] "${pdfFile.name}": ${pdf.numPages} page(s) detected`,
+  );
 
   const baseName = pdfFile.name.replace(/\.pdf$/i, "");
   const pageFiles = [];
@@ -852,10 +1372,20 @@ const splitPdfIntoPageFiles = async (pdfFile) => {
     const canvas = document.createElement("canvas");
     canvas.width = Math.ceil(viewport.width);
     canvas.height = Math.ceil(viewport.height);
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Canvas 2D context unavailable");
 
-    await page.render({ canvasContext: context, viewport, canvas }).promise;
+    console.log(
+      `[PDF Split] "${pdfFile.name}" page ${pageNum}/${pdf.numPages}: ` +
+        `rendering at ${canvas.width}x${canvas.height}px (scale=${PDF_RENDER_SCALE})`,
+    );
+
+    // pdf.js v5: pass `canvas` and let it create the 2D context. Do NOT call
+    // getContext() first — a second getContext with different options (alpha /
+    // willReadFrequently) returns null in Chromium and yields blank pages.
+    await page.render({
+      canvas,
+      viewport,
+      background: "#ffffff",
+    }).promise;
 
     const blob = await new Promise((resolve, reject) => {
       canvas.toBlob(
@@ -863,6 +1393,18 @@ const splitPdfIntoPageFiles = async (pdfFile) => {
         "image/png",
       );
     });
+
+    console.log(
+      `[PDF Split] "${pdfFile.name}" page ${pageNum}/${pdf.numPages}: ` +
+        `rendered blob = ${blob.size} bytes`,
+    );
+    if (blob.size < 3000) {
+      console.warn(
+        `[PDF Split] "${pdfFile.name}" page ${pageNum}/${pdf.numPages}: ` +
+          `blob is suspiciously small (${blob.size} bytes) - the page may ` +
+          `have rendered blank. Check canvas size limits / pdf.js worker setup.`,
+      );
+    }
 
     const paddedPage = String(pageNum).padStart(padWidth, "0");
     const totalPages = String(pdf.numPages).padStart(padWidth, "0");
@@ -886,6 +1428,10 @@ const splitPdfIntoPageFiles = async (pdfFile) => {
   } catch {
     /* ignore - cleanup is best-effort */
   }
+
+  console.log(
+    `[PDF Split] "${pdfFile.name}": finished, produced ${pageFiles.length} page file(s)`,
+  );
 
   return pageFiles;
 };
@@ -1007,11 +1553,14 @@ const filteredFiles = computed(() => {
     const d = f.editableData;
     return [
       d.filename,
+      d.nombre,
       d.documento,
       d.ncf,
+      d.ncf_afectado,
       d.tipo_de_suplidor,
       d.tipo_de_gasto,
       d.descripcion,
+      d.moneda,
       d.metodo_de_pago,
     ]
       .filter(Boolean)
@@ -1031,6 +1580,7 @@ const formatBytes = (bytes) => {
 };
 
 onMounted(() => {
+  loadClients();
   individualLimit.refresh();
   batchLimit.refresh();
   rateLimitTimer = setInterval(() => {
@@ -1061,6 +1611,8 @@ onBeforeUnmount(() => {
     window.removeEventListener("resize", onWindowResize);
     window.removeEventListener("mousemove", onPreviewResizeMove);
   }
+  closePreview();
+  files.value.forEach(revokeFileObjectUrl);
 });
 
 // Refresh immediately if another tab updates either shared counter.
@@ -1070,6 +1622,10 @@ const onRateLimitStorage = (event) => {
 };
 
 const handleFileSelect = async (event) => {
+  if (!canScan.value) {
+    event.target.value = "";
+    return;
+  }
   const selectedFiles = Array.from(event.target.files);
   await addFiles(selectedFiles);
   event.target.value = "";
@@ -1077,33 +1633,58 @@ const handleFileSelect = async (event) => {
 
 const handleDrop = async (event) => {
   event.preventDefault();
+  if (!canScan.value) return;
   const droppedFiles = Array.from(event.dataTransfer.files);
   await addFiles(droppedFiles);
 };
 
-const createFileItem = (file) => ({
-  id: fileIdCounter++,
-  name: file.name,
-  file: file,
-  status: "pending",
-  data: null,
-  originalData: null,
-  editableData: {
-    filename: file.name,
-    documento: "",
-    ncf: "",
-    tipo_de_suplidor: "",
-    tipo_de_gasto: "",
-    descripcion: "",
-    fecha: "",
-    monto_en_bienes: "",
-    itbis: "",
-    selectivo: "",
-    metodo_de_pago: "",
-  },
-  score: 0,
-  processingTime: null,
-});
+const createFileItem = (file) => {
+  const rawFile = markRaw(file);
+  const isPreviewable =
+    rawFile.type?.startsWith("image/") ||
+    rawFile.type === "application/pdf" ||
+    /\.pdf$/i.test(rawFile.name || "");
+
+  return {
+    id: fileIdCounter++,
+    name: rawFile.name,
+    file: rawFile,
+    // Eager client-side preview URL so the side panel works before any
+    // server round-trip (including right after PDF page-splitting).
+    objectUrl: isPreviewable ? URL.createObjectURL(rawFile) : null,
+    status: "pending",
+    data: null,
+    originalData: null,
+    editableData: {
+      filename: rawFile.name,
+      nombre: "",
+      documento: "",
+      ncf: "",
+      ncf_afectado: "",
+      tipo_de_suplidor: "",
+      tipo_de_gasto: "",
+      descripcion: "",
+      fecha: "",
+      monto_en_servicios: "",
+      monto_en_bienes: "",
+      itbis: "",
+      selectivo: "",
+      moneda: "",
+      metodo_de_pago: "",
+      concepto_id: null,
+      tipo_de_pago_id: null,
+    },
+    score: 0,
+    processingTime: null,
+  };
+};
+
+const revokeFileObjectUrl = (fileItem) => {
+  if (fileItem?.objectUrl) {
+    URL.revokeObjectURL(fileItem.objectUrl);
+    fileItem.objectUrl = null;
+  }
+};
 
 // Tracks PDFs currently being rasterized so the user sees feedback.
 const splittingPdfs = ref(0);
@@ -1240,16 +1821,23 @@ const isEdited = (file) => {
   if (!file.originalData) return false;
   return (
     file.editableData.filename !== file.originalData.filename ||
+    file.editableData.nombre !== file.originalData.nombre ||
     file.editableData.documento !== file.originalData.documento ||
     file.editableData.tipo_de_suplidor !== file.originalData.tipo_de_suplidor ||
     file.editableData.tipo_de_gasto !== file.originalData.tipo_de_gasto ||
     file.editableData.fecha !== file.originalData.fecha ||
+    file.editableData.monto_en_servicios !==
+      file.originalData.monto_en_servicios ||
     file.editableData.monto_en_bienes !== file.originalData.monto_en_bienes ||
     file.editableData.itbis !== file.originalData.itbis ||
     file.editableData.selectivo !== file.originalData.selectivo ||
+    file.editableData.moneda !== file.originalData.moneda ||
     file.editableData.metodo_de_pago !== file.originalData.metodo_de_pago ||
     file.editableData.descripcion !== file.originalData.descripcion ||
-    file.editableData.ncf !== file.originalData.ncf
+    file.editableData.ncf !== file.originalData.ncf ||
+    file.editableData.ncf_afectado !== file.originalData.ncf_afectado ||
+    file.editableData.concepto_id !== file.originalData.concepto_id ||
+    file.editableData.tipo_de_pago_id !== file.originalData.tipo_de_pago_id
   );
 };
 
@@ -1262,6 +1850,10 @@ const revertFile = (file) => {
 const removeFile = (file) => {
   const index = files.value.findIndex((f) => f.id === file.id);
   if (index > -1) {
+    if (previewFile.value?.id === file.id) {
+      closePreview();
+    }
+    revokeFileObjectUrl(files.value[index]);
     files.value.splice(index, 1);
   }
 };
@@ -1273,27 +1865,40 @@ const applyExtractedData = (fileItem, data) => {
 
   fileItem.editableData = {
     filename: fileItem.name,
-    documento: data.documento || "",
+    nombre: data.nombre || "",
+    documento: String(data.documento || "").replace(/\D/g, ""),
     ncf: data.ncf || "",
+    ncf_afectado: data.ncf_afectado || "",
     tipo_de_suplidor: data.tipo_de_suplidor || "",
     tipo_de_gasto: data.tipo_de_gasto || "",
     descripcion: data.descripcion || "",
-    fecha: data.fecha || "",
-    monto_en_bienes: data.monto_en_bienes
-      ? data.monto_en_bienes.toString()
-      : "",
-    itbis: data.itbis ? data.itbis.toString() : "",
-    selectivo: data.selectivo ? data.selectivo.toString() : "",
+    fecha: normalizeFecha(data.fecha || ""),
+    monto_en_servicios:
+      data.monto_en_servicios || data.monto_en_servicios === 0
+        ? String(data.monto_en_servicios)
+        : "0",
+    monto_en_bienes:
+      data.monto_en_bienes || data.monto_en_bienes === 0
+        ? String(data.monto_en_bienes)
+        : "0",
+    itbis: data.itbis || data.itbis === 0 ? String(data.itbis) : "0",
+    selectivo:
+      data.selectivo || data.selectivo === 0 ? String(data.selectivo) : "0",
+    moneda: data.moneda || "",
     metodo_de_pago: data.metodo_de_pago || "",
+    concepto_id: data.concepto_id ?? null,
+    tipo_de_pago_id: data.tipo_de_pago_id ?? null,
   };
 
   const hasData =
+    data.nombre ||
     data.documento ||
     data.ncf ||
     data.tipo_de_suplidor ||
     data.tipo_de_gasto ||
     data.fecha ||
     data.monto_en_bienes > 0 ||
+    data.monto_en_servicios > 0 ||
     data.score > 0;
 
   if (hasData) {
@@ -1319,26 +1924,59 @@ const runSingleFileEvaluation = async (fileItem) => {
   const startTime = performance.now();
   individualLimit.record(1);
 
+  console.log(
+    `[Upload] Sending "${fileItem.name}" to ${API_BASE}/upload ` +
+      `(file=${fileItem.file?.name}, type=${fileItem.file?.type}, ` +
+      `size=${fileItem.file?.size ?? "?"} bytes)`,
+  );
+  if (!fileItem.file || fileItem.file.size === 0) {
+    console.warn(
+      `[Upload] "${fileItem.name}": underlying file is missing or 0 bytes - ` +
+        `the request will send an empty/invalid file to the API.`,
+    );
+  }
+
   try {
     const formData = new FormData();
     formData.append("file", fileItem.file);
+    if (conceptoCatalogPayload.value.length) {
+      formData.append(
+        "concepto_catalog",
+        JSON.stringify(conceptoCatalogPayload.value),
+      );
+    }
+    if (tipoDePagoCatalogPayload.value.length) {
+      formData.append(
+        "tipo_de_pago_catalog",
+        JSON.stringify(tipoDePagoCatalogPayload.value),
+      );
+    }
 
     const response = await fetch(`${API_BASE}/upload`, {
       method: "POST",
       body: formData,
     });
 
+    console.log(
+      `[Upload] "${fileItem.name}": response status ${response.status} ${response.statusText}`,
+    );
+
     const result = await response.json();
+    console.log(`[Upload] "${fileItem.name}": response body`, result);
     const endTime = performance.now();
     fileItem.processingTime = endTime - startTime;
 
     if (result.status === "success") {
       applyExtractedData(fileItem, result.data);
     } else {
+      console.error(
+        `[Upload] "${fileItem.name}": API returned non-success status`,
+        result,
+      );
       fileItem.status = "error";
     }
   } catch (error) {
-    console.error("Error running single-file evaluation:", error);
+    console.error(`[Upload] "${fileItem.name}": request failed`, error);
     fileItem.status = previousStatus === "done" ? "done" : "error";
     const endTime = performance.now();
     fileItem.processingTime = endTime - startTime;
@@ -1380,18 +2018,62 @@ const getExtensionClasses = (ext) => {
 };
 
 const openPreview = (file) => {
+  console.log(
+    `[Preview] Opening preview for "${file.name}" ` +
+      `(type=${file.file?.type || "unknown"}, size=${file.file?.size ?? "?"} bytes)`,
+  );
+
   previewFile.value = file;
+
+  if (file.objectUrl) {
+    previewUrl.value = file.objectUrl;
+    console.log(`[Preview] "${file.name}": using stored object URL`);
+    return;
+  }
+
   if (isImageFile(file) || isPdfFile(file)) {
-    previewUrl.value = URL.createObjectURL(file.file);
+    if (!file.file || file.file.size === 0) {
+      console.warn(
+        `[Preview] "${file.name}": underlying file is missing or 0 bytes - ` +
+          `preview will likely appear blank.`,
+      );
+    }
+    // Fallback for older items that somehow lack an eager URL.
+    file.objectUrl = URL.createObjectURL(file.file);
+    previewUrl.value = file.objectUrl;
+    console.log(
+      `[Preview] "${file.name}": created object URL ${previewUrl.value}`,
+    );
   } else {
+    console.log(
+      `[Preview] "${file.name}": no preview available for this file type`,
+    );
     previewUrl.value = null;
   }
 };
 
-const closePreview = () => {
-  if (previewUrl.value) {
-    URL.revokeObjectURL(previewUrl.value);
+const onPreviewImageLoad = (event) => {
+  const img = event.target;
+  console.log(
+    `[Preview] Image loaded successfully: ${img.naturalWidth}x${img.naturalHeight}px`,
+  );
+  if (img.naturalWidth === 0 || img.naturalHeight === 0) {
+    console.warn(
+      "[Preview] Loaded image has 0 dimensions - it is likely corrupt or empty.",
+    );
   }
+};
+
+const onPreviewImageError = (event) => {
+  console.error(
+    `[Preview] Failed to load preview image for "${previewFile.value?.name}". ` +
+      `The object URL may be invalid or the underlying blob is corrupt.`,
+    event,
+  );
+};
+
+const closePreview = () => {
+  // Do not revoke here — objectUrl is owned by the file item until remove/clear.
   previewFile.value = null;
   previewUrl.value = null;
 };
@@ -1442,12 +2124,16 @@ const formatTime = (milliseconds) => {
 };
 
 const processAll = async () => {
+  if (!canScan.value) {
+    alert("Selecciona un cliente y sus documentos de ERP antes de procesar.");
+    return;
+  }
   processing.value = true;
   totalProcessingTime.value = 0;
   const overallStartTime = performance.now();
 
   const pendingFiles = files.value.filter((f) => f.status === "pending");
-  const BATCH_SIZE = 10;
+  const BATCH_SIZE = 15;
   let stoppedForCooldown = false;
 
   for (let i = 0; i < pendingFiles.length; i += BATCH_SIZE) {
@@ -1465,16 +2151,51 @@ const processAll = async () => {
     const batchStart = performance.now();
     batchLimit.record(1);
 
+    console.log(
+      `[Batch Upload] Sending batch ${Math.floor(i / BATCH_SIZE) + 1} ` +
+        `(${batch.length} file(s)) to ${API_BASE}/upload-batch:`,
+      batch.map((f) => ({
+        name: f.name,
+        type: f.file?.type,
+        size: f.file?.size,
+      })),
+    );
+
+    const emptyFiles = batch.filter((f) => !f.file || f.file.size === 0);
+    if (emptyFiles.length > 0) {
+      console.warn(
+        `[Batch Upload] ${emptyFiles.length} file(s) in this batch are missing ` +
+          `or 0 bytes:`,
+        emptyFiles.map((f) => f.name),
+      );
+    }
+
     try {
       const formData = new FormData();
       batch.forEach((fileItem) => {
         formData.append("files", fileItem.file, fileItem.name);
       });
+      if (conceptoCatalogPayload.value.length) {
+        formData.append(
+          "concepto_catalog",
+          JSON.stringify(conceptoCatalogPayload.value),
+        );
+      }
+      if (tipoDePagoCatalogPayload.value.length) {
+        formData.append(
+          "tipo_de_pago_catalog",
+          JSON.stringify(tipoDePagoCatalogPayload.value),
+        );
+      }
 
       const response = await fetch(`${API_BASE}/upload-batch`, {
         method: "POST",
         body: formData,
       });
+
+      console.log(
+        `[Batch Upload] Response status ${response.status} ${response.statusText}`,
+      );
 
       if (!response.ok) {
         throw new Error(
@@ -1483,6 +2204,7 @@ const processAll = async () => {
       }
 
       const result = await response.json();
+      console.log("[Batch Upload] Response body:", result);
       const batchEnd = performance.now();
       const perFileTime = (batchEnd - batchStart) / batch.length;
 
@@ -1493,6 +2215,9 @@ const processAll = async () => {
         const fileResult = results[idx];
 
         if (!fileResult) {
+          console.error(
+            `[Batch Upload] "${fileItem.name}": no matching result at index ${idx} in response`,
+          );
           fileItem.status = "error";
           return;
         }
@@ -1500,13 +2225,28 @@ const processAll = async () => {
         if (fileResult.status === "duplicate") {
           fileItem.status = "duplicate";
         } else if (fileResult.status === "success" && fileResult.data) {
-          applyExtractedData(fileItem, fileResult.data);
+          const data = fileResult.data;
+          const hasAnyData =
+            data.nombre || data.documento || data.ncf || data.fecha;
+          if (!hasAnyData) {
+            console.warn(
+              `[Batch Upload] "${fileItem.name}": API returned success but all ` +
+                `key fields are empty (score=${data.score}). The image sent for ` +
+                `this file may be blank/unreadable - check the server logs and ` +
+                `the preview for this file.`,
+            );
+          }
+          applyExtractedData(fileItem, data);
         } else {
+          console.error(
+            `[Batch Upload] "${fileItem.name}": unexpected result`,
+            fileResult,
+          );
           fileItem.status = "error";
         }
       });
     } catch (error) {
-      console.error("Error processing batch:", error);
+      console.error("[Batch Upload] Error processing batch:", error);
       const batchEnd = performance.now();
       const perFileTime = (batchEnd - batchStart) / batch.length;
       batch.forEach((fileItem) => {
@@ -1530,20 +2270,46 @@ const processAll = async () => {
   }
 };
 
+const buildCargaMasivaFilename = () => {
+  const client = clients.value.find((c) => c.id === selectedClientId.value);
+  const rawName = (client?.name || "cliente").trim() || "cliente";
+  const clientName = rawName
+    .replace(/[\\/:*?"<>|]+/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = [
+    pad(now.getDate()),
+    pad(now.getMonth() + 1),
+    now.getFullYear(),
+  ].join("_") + `_${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  return `${clientName || "cliente"}-carga_masiva_gastos-${stamp}.xls`;
+};
+
 const downloadExcel = async () => {
   try {
     const filesData = files.value
       .filter((f) => f.status === "done")
       .map((f) => ({
         filename: f.editableData.filename,
-        documento: f.editableData.documento || "",
+        nombre: (f.editableData.nombre || "").slice(0, 255),
+        documento: String(f.editableData.documento || "").replace(/\D/g, ""),
+        ncf: f.editableData.ncf || "",
+        ncf_afectado: String(f.editableData.ncf_afectado || "").slice(0, 11),
         tipo_de_suplidor: f.editableData.tipo_de_suplidor || "",
         tipo_de_gasto: f.editableData.tipo_de_gasto || "",
-        fecha: f.editableData.fecha || "",
+        descripcion: (f.editableData.descripcion || "").slice(0, 200),
+        fecha: normalizeFecha(f.editableData.fecha || ""),
+        monto_en_servicios: f.editableData.monto_en_servicios || "0",
         monto_en_bienes: f.editableData.monto_en_bienes || "0",
         itbis: f.editableData.itbis || "0",
         selectivo: f.editableData.selectivo || "0",
+        moneda: f.editableData.moneda || "",
         metodo_de_pago: f.editableData.metodo_de_pago || "",
+        concepto_id: f.editableData.concepto_id,
+        tipo_de_pago_id: f.editableData.tipo_de_pago_id,
       }));
 
     const response = await fetch(`${API_BASE}/download`, {
@@ -1558,7 +2324,7 @@ const downloadExcel = async () => {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "processed_receipts.xlsx";
+    a.download = buildCargaMasivaFilename();
     document.body.appendChild(a);
     a.click();
     window.URL.revokeObjectURL(url);
@@ -1570,6 +2336,8 @@ const downloadExcel = async () => {
 };
 
 const clearFiles = () => {
+  closePreview();
+  files.value.forEach(revokeFileObjectUrl);
   files.value = [];
   sourceDocuments.value = [];
   totalProcessingTime.value = 0;

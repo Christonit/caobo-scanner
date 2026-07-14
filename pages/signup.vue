@@ -13,7 +13,7 @@ const loading = ref(false);
 const success = ref(false);
 
 watchEffect(() => {
-  if (user.value && !success.value) router.replace("/");
+  if (user.value?.sub && !success.value) router.replace("/");
 });
 
 async function signup() {

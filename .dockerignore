@@ -1,0 +1,12 @@
+node_modules
+.nuxt
+.output
+.git
+.agents
+.cursor
+bucket
+python_backend
+*.md
+.env
+.env.*
+template.xls

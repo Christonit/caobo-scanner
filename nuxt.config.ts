@@ -2,15 +2,24 @@
 
 export default defineNuxtConfig({
   devtools: { enabled: true },
-  modules: ["@pinia/nuxt", "@nuxtjs/tailwindcss", "@nuxtjs/supabase"],
+  modules: ["@nuxtjs/tailwindcss", "@nuxtjs/supabase"],
   runtimeConfig: {
+    // Server-only. The Gemini API key powers template/invoice analysis and
+    // must never reach the browser.
+    geminiApiKey: process.env.GEMINI_API_KEY || "",
+    // Default model used by the template-analysis endpoint.
+    templateAnalysisModel:
+      process.env.TEMPLATE_ANALYSIS_MODEL || "gemini-2.5-flash",
+    // Default model used when extracting data from invoices/receipts.
+    invoiceAnalysisModel: process.env.INVOICE_ANALYSIS_MODEL || "",
     public: {
+      // Overridable at runtime with NUXT_PUBLIC_API_BASE (see useApiBase()).
       apiBase: process.env.NUXT_PUBLIC_API_BASE || "http://localhost:8000",
       // Feature flags. Defaults can be overridden per-environment via env
       // vars (NUXT_PUBLIC_FEATURES_AUTH=false, NUXT_PUBLIC_FEATURES_TEAM=false).
       // Consume via `useFeatureFlags()` (see composables/useFeatureFlags.ts).
       features: {
-        auth: false,
+        auth: true,
         team: true,
       },
     },

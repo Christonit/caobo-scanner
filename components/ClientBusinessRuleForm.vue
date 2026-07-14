@@ -1,65 +1,64 @@
 <script setup lang="ts">
 import type {
-  ClientDocumentInput,
-  ClientDocumentWithAttributes,
-} from "~/composables/useClientDocuments";
+  ClientBusinessRuleInput,
+  ClientBusinessRuleWithAttributes,
+} from "~/composables/useClientBusinessRules";
 
 const props = withDefaults(
   defineProps<{
     submitting?: boolean;
-    initial?: ClientDocumentWithAttributes | null;
+    initial?: ClientBusinessRuleWithAttributes | null;
     submitLabel?: string;
   }>(),
   {
     submitting: false,
     initial: null,
-    submitLabel: "Crear documento",
+    submitLabel: "Crear regla",
   }
 );
 
 const emit = defineEmits<{
-  (e: "submit", input: ClientDocumentInput): void;
+  (e: "submit", input: ClientBusinessRuleInput): void;
   (e: "cancel"): void;
 }>();
 
 let rowSeq = 0;
-const nextId = () => `attr-${rowSeq++}`;
+const nextId = () => `rule-attr-${rowSeq++}`;
 
 type AttributeRow = {
   key: string;
   dbId?: number;
-  documentType: string;
-  documentId: string;
+  ruleType: string;
+  ruleValue: string;
   description: string;
 };
 
 function rowsFromInitial(
-  doc: ClientDocumentWithAttributes | null | undefined
+  rule: ClientBusinessRuleWithAttributes | null | undefined
 ): AttributeRow[] {
-  if (!doc?.document_attributes?.length) {
-    return [{ key: nextId(), documentType: "", documentId: "", description: "" }];
+  if (!rule?.business_rule_attributes?.length) {
+    return [{ key: nextId(), ruleType: "", ruleValue: "", description: "" }];
   }
-  return doc.document_attributes.map((a) => ({
+  return rule.business_rule_attributes.map((a) => ({
     key: nextId(),
     dbId: a.id,
-    documentType: a.document_type,
-    documentId: a.document_id != null ? String(a.document_id) : "",
+    ruleType: a.rule_type,
+    ruleValue: a.rule_value ?? "",
     description: a.description ?? "",
   }));
 }
 
-const documentName = ref(props.initial?.document_name ?? "");
-const documentComment = ref(props.initial?.comment ?? "");
+const ruleName = ref(props.initial?.rule_name ?? "");
 const attributes = ref<AttributeRow[]>(rowsFromInitial(props.initial));
 const formError = ref<string | null>(null);
 
 const filledAttributeCount = computed(
-  () => attributes.value.filter((a) => a.documentType.trim().length > 0).length
+  () => attributes.value.filter((a) => a.ruleType.trim().length > 0).length
 );
 
 const canSubmit = computed(
   () =>
-    documentName.value.trim().length > 0 &&
+    ruleName.value.trim().length > 0 &&
     filledAttributeCount.value > 0 &&
     !props.submitting
 );
@@ -67,8 +66,8 @@ const canSubmit = computed(
 function addAttribute() {
   attributes.value.push({
     key: nextId(),
-    documentType: "",
-    documentId: "",
+    ruleType: "",
+    ruleValue: "",
     description: "",
   });
 }
@@ -76,33 +75,22 @@ function addAttribute() {
 function removeAttribute(key: string) {
   if (attributes.value.length <= 1) {
     attributes.value = [
-      { key: nextId(), documentType: "", documentId: "", description: "" },
+      { key: nextId(), ruleType: "", ruleValue: "", description: "" },
     ];
     return;
   }
   attributes.value = attributes.value.filter((a) => a.key !== key);
 }
 
-function parseDocumentId(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const n = Number(trimmed);
-  if (!Number.isInteger(n) || n < 0) {
-    throw new Error("El ID de ERP debe ser un número entero.");
-  }
-  return n;
-}
-
 function onSubmit() {
   formError.value = null;
   try {
-    const input: ClientDocumentInput = {
-      documentName: documentName.value,
-      documentComment: documentComment.value,
+    const input: ClientBusinessRuleInput = {
+      ruleName: ruleName.value,
       attributes: attributes.value.map((a) => ({
         id: a.dbId,
-        documentType: a.documentType,
-        documentId: parseDocumentId(a.documentId),
+        ruleType: a.ruleType,
+        ruleValue: a.ruleValue,
         description: a.description,
       })),
     };
@@ -117,52 +105,32 @@ function onSubmit() {
   <form class="space-y-6" @submit.prevent="onSubmit">
     <div>
       <label
-        for="document-name"
+        for="rule-name"
         class="mb-1.5 block text-sm font-medium text-gray-700"
       >
-        Nombre del documento
+        Nombre de la regla
       </label>
       <input
-        id="document-name"
-        v-model="documentName"
+        id="rule-name"
+        v-model="ruleName"
         type="text"
         required
         class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-        placeholder="Ej. Gastos, Ingresos, Tipo de Pago"
+        placeholder="Ej. Clasificación de gastos, Excepciones de facturación"
       />
       <p class="mt-1.5 text-xs text-gray-400">
-        Agrupa los conceptos / tipos de pago del ERP para este cliente.
-      </p>
-    </div>
-
-    <div>
-      <label
-        for="document-comment"
-        class="mb-1.5 block text-sm font-medium text-gray-700"
-      >
-        Comentario del documento
-        <span class="font-normal text-gray-400">(opcional)</span>
-      </label>
-      <textarea
-        id="document-comment"
-        v-model="documentComment"
-        rows="3"
-        class="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-        placeholder="Contexto general para este grupo de conceptos/tipos de pago que ayude a la IA a clasificar mejor…"
-      />
-      <p class="mt-1.5 text-xs text-gray-400">
-        Se envía a la IA junto con los comentarios de cada atributo al
-        procesar documentos de este cliente.
+        Agrupa reglas de negocio que ayudan a la IA a tomar mejores decisiones
+        para este cliente.
       </p>
     </div>
 
     <div>
       <div class="mb-3 flex items-end justify-between gap-3">
         <div>
-          <h3 class="text-sm font-semibold text-gray-900">Atributos</h3>
+          <h3 class="text-sm font-semibold text-gray-900">Reglas</h3>
           <p class="mt-0.5 text-xs text-gray-400">
-            Cada fila es un concepto o tipo de pago con su ID de ERP y comentario
-            opcional.
+            Cada fila es una regla de negocio con un contexto opcional para la
+            IA.
           </p>
         </div>
         <button
@@ -170,7 +138,7 @@ function onSubmit() {
           class="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
           @click="addAttribute"
         >
-          Agregar atributo
+          Agregar regla
         </button>
       </div>
 
@@ -184,12 +152,12 @@ function onSubmit() {
             <span
               class="text-xs font-medium uppercase tracking-wide text-gray-400"
             >
-              Atributo {{ index + 1 }}
+              Regla {{ index + 1 }}
             </span>
             <button
               type="button"
               class="rounded-md px-2 py-1 text-xs font-medium text-gray-400 transition hover:bg-red-50 hover:text-red-500"
-              title="Quitar atributo"
+              title="Quitar regla"
               @click="removeAttribute(row.key)"
             >
               Quitar
@@ -199,52 +167,51 @@ function onSubmit() {
           <div class="grid gap-3 sm:grid-cols-2">
             <div class="sm:col-span-2">
               <label
-                :for="`attr-type-${row.key}`"
+                :for="`rule-type-${row.key}`"
                 class="mb-1.5 block text-sm font-medium text-gray-700"
               >
-                Tipo / concepto
+                Regla
               </label>
               <input
-                :id="`attr-type-${row.key}`"
-                v-model="row.documentType"
+                :id="`rule-type-${row.key}`"
+                v-model="row.ruleType"
                 type="text"
                 class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                placeholder="Ej. CARGOS BANCARIOS"
+                placeholder="Ej. Facturas sin NCF"
               />
             </div>
 
             <div>
               <label
-                :for="`attr-erp-${row.key}`"
+                :for="`rule-value-${row.key}`"
                 class="mb-1.5 block text-sm font-medium text-gray-700"
               >
-                ID ERP
+                Valor / referencia
                 <span class="font-normal text-gray-400">(opcional)</span>
               </label>
               <input
-                :id="`attr-erp-${row.key}`"
-                v-model="row.documentId"
+                :id="`rule-value-${row.key}`"
+                v-model="row.ruleValue"
                 type="text"
-                inputmode="numeric"
                 class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                placeholder="Ej. 1"
+                placeholder="Ej. código o referencia interna"
               />
             </div>
 
             <div class="sm:col-span-2">
               <label
-                :for="`attr-desc-${row.key}`"
+                :for="`rule-desc-${row.key}`"
                 class="mb-1.5 block text-sm font-medium text-gray-700"
               >
-                Comentario
+                Contexto para la IA
                 <span class="font-normal text-gray-400">(opcional)</span>
               </label>
               <textarea
-                :id="`attr-desc-${row.key}`"
+                :id="`rule-desc-${row.key}`"
                 v-model="row.description"
                 rows="2"
                 class="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                placeholder="Notas para clasificar este tipo de gasto o pago…"
+                placeholder="Explica cómo debe aplicarse esta regla al procesar documentos…"
               />
             </div>
           </div>

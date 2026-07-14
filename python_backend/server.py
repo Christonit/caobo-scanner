@@ -46,6 +46,32 @@ TIPO_DE_GASTO_OPTIONS = [
     "11-Gastos de seguros",
 ]
 
+# Canonical "Moneda" values: capitalized (first letter only), not upper/title
+# cased - "Peso dominicano" keeps "dominicano" lowercase, "Dólares"/"Euros"
+# keep their natural single-word capitalization.
+MONEDA_OPTIONS = ["Peso dominicano", "Dólares", "Euros"]
+MONEDA_ALIASES = {
+    "dop": "Peso dominicano",
+    "rd$": "Peso dominicano",
+    "peso": "Peso dominicano",
+    "pesos": "Peso dominicano",
+    "peso dominicano": "Peso dominicano",
+    "pesos dominicanos": "Peso dominicano",
+    "usd": "Dólares",
+    "us$": "Dólares",
+    "$": "Dólares",
+    "dolar": "Dólares",
+    "dolares": "Dólares",
+    "dólar": "Dólares",
+    "dólares": "Dólares",
+    "dollar": "Dólares",
+    "dollars": "Dólares",
+    "eur": "Euros",
+    "€": "Euros",
+    "euro": "Euros",
+    "euros": "Euros",
+}
+
 # NCF series that require "NCF Afectado" (credit/debit notes).
 NCF_AFECTADO_REQUIRED_PREFIXES = ("B03", "B04")
 
@@ -148,6 +174,27 @@ def check_duplicate(file_hash: str) -> bool:
     """Check if file hash exists in history"""
     history = load_history()
     return any(entry.get('hash') == file_hash for entry in history)
+
+
+def _new_dedupe_state() -> Tuple[set, dict, set, dict]:
+    """
+    Fresh, empty lookup structures used to detect duplicate receipts WITHIN
+    a single upload/batch request only (e.g. the same page appearing twice
+    in a multi-page PDF, or the same receipt photographed/selected more than
+    once in one "Process All" run).
+
+    Returns (seen_hashes, hash_to_filename, seen_keys, key_to_filename).
+    Callers add to these in-place as they walk the current request's files.
+
+    Deliberately NOT seeded from history.json: persisting duplicate
+    detection across sessions meant re-scanning the exact same document
+    after reloading the page (e.g. to retry/verify) would be permanently
+    flagged as "duplicate" and silently skipped, which is confusing and not
+    what users expect - duplicate detection should only guard against
+    accidentally including the same receipt twice in one export, not block
+    intentional re-processing later.
+    """
+    return set(), {}, set(), {}
 
 
 def create_template_xlsx(xlsx_path: Path):
@@ -285,7 +332,7 @@ SYSTEM_PROMPT = """Tu eres un contador educado y radicado en republica dominican
 
     - documento: El RNC/cedula del suplidor. SOLO digitos, sin guiones ni caracteres especiales (ej: "101702176", "00200078964", "987356102"). Si aparece como "101-70217-6", devolver "101702176".
 
-    - ncf: El NCF (Numero de Comprobante Fiscal). Es un codigo alfanumerico que empieza con una letra (B, E, etc.) seguido de digitos. Ejemplo: E310001987518, B0100014525.
+    - ncf: El NCF (Numero de Comprobante Fiscal). Es un codigo alfanumerico que empieza con una letra (B, E, etc.) seguido de digitos. Ejemplo: E310001987518, B0100014525. Si el valor viene con ceros a la izquierda ANTES de B01 o B02 (ej: "0000000B0100222157"), quita esos ceros y devolver "B0100222157". NO quites ceros internos ni ceros de series E31 u otras (ej: "E310000029838" se deja tal cual).
 
     - ncf_afectado: NCF modificado/afectado cuando el comprobante es nota de credito (B03) o nota de debito (B04). Maximo 11 caracteres. Si el NCF NO es B03/B04, dejar "".
 
@@ -325,7 +372,11 @@ SYSTEM_PROMPT = """Tu eres un contador educado y radicado en republica dominican
 
     - selectivo: Impuesto selectivo o % LEY si aplica. Normalmente para combustibles y bebidas. Si no aparece, dejar en 0.
 
-    - moneda: Codigo ISO de 3 letras (ej: "DOP", "USD", "EUR"). Si no se especifica, asume "DOP".
+    - moneda: Debe ser EXACTAMENTE uno de estos valores (respeta las mayusculas/minusculas tal cual):
+    Peso dominicano
+    Dólares
+    Euros
+    Si no se especifica, asume "Peso dominicano".
 
     - metodo_de_pago: Identificar como uno de:
     + EFECTIVO
@@ -425,10 +476,50 @@ def _normalize_catalog_value(value: str, options: list[str]) -> str:
     return text
 
 
+def _normalize_moneda(value) -> str:
+    """
+    Return the canonical "Moneda" value: "Peso dominicano", "Dólares" or
+    "Euros" - capitalized (first letter only, casing otherwise preserved),
+    never all-caps ISO codes like "DOP"/"USD"/"EUR". Defaults to "Peso
+    dominicano" when unspecified, per the extraction prompt's own default.
+    """
+    text = (str(value or "")).strip()
+    if not text:
+        return "Peso dominicano"
+
+    lowered = text.lower()
+    if lowered in MONEDA_ALIASES:
+        return MONEDA_ALIASES[lowered]
+
+    for option in MONEDA_OPTIONS:
+        if option.lower() == lowered:
+            return option
+
+    # Word-boundary substring match (e.g. "USD 500" or "en dolares"), guarded
+    # against alnum characters on either side so short aliases can't match
+    # inside unrelated words (e.g. "rd$" must not match inside "absurdo").
+    for alias, canonical in MONEDA_ALIASES.items():
+        pattern = r"(?<![a-z0-9áéíóúñ])" + re.escape(alias) + r"(?![a-z0-9áéíóúñ])"
+        if re.search(pattern, lowered):
+            return canonical
+
+    return text[:1].upper() + text[1:]
+
+
+def _normalize_ncf(value) -> str:
+    """
+    Normalize an NCF: strip whitespace and uppercase only.
+
+    Removing typed nomenclatures (B01, E31, …) on export is owned by the
+    frontend ("Remover nomenclaturas NCF") so the user's toggle / series /
+    target columns are respected when writing Excel.
+    """
+    return re.sub(r"\s+", "", str(value or "")).upper()
+
+
 def _normalize_ncf_afectado(value, ncf: str = "") -> str:
     """Optional; max 11 chars. Required by template when NCF is B03/B04."""
-    text = re.sub(r"\s+", "", str(value or "")).upper()
-    return text[:11]
+    return _normalize_ncf(value)[:11]
 
 
 def _to_int_or_none(value) -> Optional[int]:
@@ -481,6 +572,57 @@ def _clean_catalog(catalog: Optional[list]) -> list[dict]:
     return cleaned
 
 
+def _clean_business_rules(rules: Optional[list]) -> list[dict]:
+    """
+    Normalize a per-client business-rules list (from client_business_rules ->
+    business_rule_attributes) to {rule_type, rule_value, description}. Unlike
+    the Concepto/Tipo de Pago catalogs, these are free-form context hints for
+    the AI (not classification options with an ERP id), so entries only need
+    a non-empty rule_type to be kept.
+    """
+    if not rules:
+        return []
+    cleaned = []
+    for entry in rules:
+        if not isinstance(entry, dict):
+            continue
+        rule_type = str(entry.get("rule_type", "") or "").strip()
+        if not rule_type:
+            continue
+        cleaned.append({
+            "rule_type": rule_type,
+            "rule_value": str(entry.get("rule_value", "") or "").strip(),
+            "description": str(entry.get("description", "") or "").strip(),
+        })
+    return cleaned
+
+
+def _clean_document_context(entries: Optional[list]) -> list[dict]:
+    """
+    Normalize a per-client document (client_documents -> document_attributes)
+    that's being used purely as CONTEXT for an already-fixed field (e.g.
+    tipo_de_gasto), rather than as a list of valid output values. Unlike
+    _clean_catalog, entries are kept even without a usable document_id since
+    there's no ERP id to write back for this use case - only a non-empty
+    document_type (label) is required.
+    """
+    if not entries:
+        return []
+    cleaned = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get("document_type", "") or "").strip()
+        if not label:
+            continue
+        cleaned.append({
+            "document_type": label,
+            "document_id": _to_int_or_none(entry.get("document_id")),
+            "description": str(entry.get("description", "") or "").strip(),
+        })
+    return cleaned
+
+
 def _match_catalog_label(label: str, catalog: list[dict]) -> Tuple[str, Optional[int]]:
     """
     Match free text (usually returned by the LLM) against a dynamic per-client
@@ -504,11 +646,23 @@ def _match_catalog_label(label: str, catalog: list[dict]) -> Tuple[str, Optional
     return text, None
 
 
-def _build_catalog_prompt_block(concepto_catalog: list[dict], tipo_de_pago_catalog: list[dict]) -> str:
+def _build_catalog_prompt_block(
+    concepto_catalog: list[dict],
+    tipo_de_pago_catalog: list[dict],
+    concepto_document_comment: str = "",
+    tipo_de_pago_document_comment: str = "",
+) -> str:
     """
     Build the dynamic, per-client portion of the extraction prompt describing
     the Concepto / Tipo de Pago options available for this specific client.
     Returns "" when neither catalog has usable entries.
+
+    concepto_document_comment / tipo_de_pago_document_comment: optional
+    document-level notes (set on the client_documents "Gastos"/"Tipo de
+    Pago" container itself, e.g. "comment" column) that apply to ALL options
+    in that catalog, on top of each option's own description/comment. Pass
+    "" when the document has no comment - the prompt then behaves exactly
+    as if this feature didn't exist.
     """
     def _format_options(catalog: list[dict]) -> str:
         return "\n".join(
@@ -518,20 +672,36 @@ def _build_catalog_prompt_block(concepto_catalog: list[dict], tipo_de_pago_catal
 
     blocks = []
     if concepto_catalog:
+        comment_line = (
+            f"    Contexto general de este documento (definido por el usuario, "
+            f"aplica a todas las opciones de Concepto de este cliente): "
+            f"{concepto_document_comment}\n"
+            if concepto_document_comment else ""
+        )
         blocks.append(
             "- concepto: Clasifica el gasto segun el CONCEPTO contable especifico "
             "de este cliente. Debe ser EXACTAMENTE uno de estos valores (copia el "
             "texto tal cual, sin agregar nada):\n"
+            f"{comment_line}"
             f"{_format_options(concepto_catalog)}\n"
             "    Si ninguno aplica claramente, deja el valor como cadena vacia \"\"."
         )
     if tipo_de_pago_catalog:
+        comment_line = (
+            f"    Contexto general de este documento (definido por el usuario, "
+            f"aplica a todas las opciones de Tipo de Pago de este cliente): "
+            f"{tipo_de_pago_document_comment}\n"
+            if tipo_de_pago_document_comment else ""
+        )
         blocks.append(
             "- tipo_de_pago_erp: Clasifica la forma de pago/registro contable de "
             "este gasto para este cliente especifico. Debe ser EXACTAMENTE uno de "
             "estos valores (copia el texto tal cual, sin agregar nada):\n"
+            f"{comment_line}"
             f"{_format_options(tipo_de_pago_catalog)}\n"
-            "    Si ninguno aplica claramente, deja el valor como cadena vacia \"\"."
+            "    Este campo es OBLIGATORIO y NUNCA debe quedar vacio: si ninguno "
+            "coincide perfectamente, elige el valor de la lista que mas se "
+            "aproxime a la forma de pago detectada en el documento."
         )
 
     if not blocks:
@@ -542,7 +712,83 @@ def _build_catalog_prompt_block(concepto_catalog: list[dict], tipo_de_pago_catal
         "varian por cliente, NO uses conocimiento general para esto):\n"
         + "\n".join(blocks)
         + "\n\nIncluye 'concepto' y 'tipo_de_pago_erp' como claves adicionales "
-        "en el JSON de salida (usa cadena vacia \"\" si no aplica ninguna)."
+        "en el JSON de salida. 'concepto' puede ser cadena vacia \"\" si "
+        "ninguna opcion aplica, pero 'tipo_de_pago_erp' SIEMPRE debe llevar "
+        "uno de los valores listados (nunca cadena vacia)."
+    )
+
+
+def _build_business_rules_prompt_block(business_rules: list[dict]) -> str:
+    """
+    Build the optional, per-client "business rules" portion of the
+    extraction prompt: free-form context (exceptions, conventions,
+    classification hints, etc.) that helps the AI make better decisions for
+    this specific client. Unlike the Concepto/Tipo de Pago catalogs, these
+    are NOT a fixed set of valid output values - just contextual guidance.
+    Returns "" when there are no usable rules.
+    """
+    if not business_rules:
+        return ""
+
+    lines = []
+    for rule in business_rules:
+        label = rule["rule_type"]
+        if rule.get("rule_value"):
+            label += f" ({rule['rule_value']})"
+        if rule.get("description"):
+            lines.append(f"    - {label}: {rule['description']}")
+        else:
+            lines.append(f"    - {label}")
+
+    return (
+        "\n\nADICIONAL - Reglas de negocio de este cliente especifico "
+        "(contexto para ayudarte a tomar mejores decisiones al clasificar "
+        "y extraer este documento; NO son valores fijos que debas copiar "
+        "literalmente, solo guian tu criterio):\n"
+        + "\n".join(lines)
+    )
+
+
+def _build_tipo_de_gasto_context_block(
+    context: list[dict], document_comment: str = ""
+) -> str:
+    """
+    Build optional, per-client context to help the AI choose among the
+    FIXED tipo_de_gasto options (TIPO_DE_GASTO_OPTIONS, baked into
+    SYSTEM_PROMPT) - typically a client_documents container the user picked
+    specifically to describe how THIS client's suppliers/categories map to
+    those 11 fixed options. This block NEVER introduces new tipo_de_gasto
+    values; it only guides which of the existing 11 fits best. Returns ""
+    when there's nothing to add.
+    """
+    if not context and not document_comment:
+        return ""
+
+    lines = []
+    if document_comment:
+        lines.append(
+            f"    Contexto general de este documento (definido por el "
+            f"usuario): {document_comment}"
+        )
+    for entry in context:
+        label = entry["document_type"]
+        if entry.get("document_id") is not None:
+            label += f" (ref. {entry['document_id']})"
+        if entry.get("description"):
+            lines.append(f"    - {label}: {entry['description']}")
+        else:
+            lines.append(f"    - {label}")
+
+    if not lines:
+        return ""
+
+    return (
+        "\n\nADICIONAL - Contexto especifico de este cliente para elegir "
+        "'tipo_de_gasto' (usa esto UNICAMENTE como ayuda para decidir cual "
+        "de las 11 opciones fijas de tipo_de_gasto (arriba) aplica mejor; "
+        "NUNCA inventes un valor nuevo ni copies este texto como respuesta "
+        "- el resultado debe seguir siendo EXACTAMENTE uno de los 11 "
+        "valores fijos listados):\n" + "\n".join(lines)
     )
 
 
@@ -551,7 +797,7 @@ def prepare_export_row(data: dict) -> dict:
     Normalize a receipt dict to Carga Masiva template rules before writing Excel.
     Safe to call on both freshly extracted and user-edited payloads.
     """
-    ncf = str(data.get("ncf", "") or "").strip().upper()
+    ncf = _normalize_ncf(data.get("ncf", ""))
     nombre = str(data.get("nombre", "") or "").strip()[:255]
     descripcion = str(data.get("descripcion", "") or "").strip()[:200]
     ncf_afectado = _normalize_ncf_afectado(data.get("ncf_afectado", ""), ncf)
@@ -581,13 +827,56 @@ def prepare_export_row(data: dict) -> dict:
         "monto_en_bienes": _num(data.get("monto_en_bienes")),
         "itbis": _num(data.get("itbis")),
         "selectivo": _num(data.get("selectivo")),
-        "moneda": str(data.get("moneda", "") or "").strip().upper(),
+        "moneda": _normalize_moneda(data.get("moneda", "")),
         "metodo_de_pago": str(data.get("metodo_de_pago", "") or "").strip(),
         "concepto_id": _to_int_or_none(data.get("concepto_id")),
         "tipo_de_pago_id": _to_int_or_none(data.get("tipo_de_pago_id")),
         "filename": data.get("filename", "") or "",
         "score": data.get("score", 0) or 0,
     }
+
+
+def _normalize_for_key(value) -> str:
+    """Collapse whitespace and lowercase, for building duplicate-detection keys."""
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _receipt_identity_key(data: dict) -> Optional[str]:
+    """
+    Build a signature identifying the underlying receipt/invoice represented
+    by an extracted-data dict, so the SAME receipt scanned/uploaded more than
+    once (as a different file, photo angle, or duplicate page) can be
+    detected even when the file bytes differ.
+
+    - When both `documento` (supplier RNC) and `ncf` are present, the pair is
+      used: an NCF is unique per supplier under DR tax law, so this is the
+      strongest possible duplicate signal.
+    - Otherwise (e.g. informal/no-NCF receipts) falls back to
+      documento/nombre + fecha + monto totals - a weaker but still
+      reasonable signal for receipts without a fiscal number.
+    - Returns None when there isn't enough extracted signal to safely judge
+      duplication (e.g. an almost-empty/failed extraction) - under-detecting
+      is preferable to wrongly collapsing two unrelated blank results.
+    """
+    prepared = prepare_export_row(data)
+    documento = _normalize_for_key(prepared.get("documento"))
+    ncf = _normalize_for_key(prepared.get("ncf"))
+    nombre = _normalize_for_key(prepared.get("nombre"))
+    fecha = _normalize_for_key(prepared.get("fecha"))
+    supplier = documento or nombre
+
+    if ncf and supplier:
+        return f"ncf:{supplier}|{ncf}"
+
+    if not supplier or not fecha:
+        return None
+
+    monto_servicios = round(_num(prepared.get("monto_en_servicios")), 2)
+    monto_bienes = round(_num(prepared.get("monto_en_bienes")), 2)
+    if monto_servicios == 0 and monto_bienes == 0:
+        return None
+
+    return f"amt:{supplier}|{fecha}|{monto_servicios}|{monto_bienes}"
 
 
 # Template header aliases (headers are matched lowercased + stripped).
@@ -613,10 +902,14 @@ EXCEL_FIELD_MAPPINGS = {
 
 EXCEL_TEXT_FIELDS = [
     "nombre", "documento", "ncf", "ncf_afectado", "tipo_de_suplidor", "tipo_de_gasto",
-    "descripcion", "fecha", "moneda", "metodo_de_pago",
+    "descripcion", "moneda", "metodo_de_pago",
 ]
 EXCEL_NUMERIC_FIELDS = ["monto_en_servicios", "monto_en_bienes", "itbis", "selectivo"]
 EXCEL_INT_FIELDS = ["concepto_id", "tipo_de_pago_id"]
+# The template's Fecha column is formatted as a real Excel date (not text);
+# the destination CRM validates it as a date type, so it must be written as
+# an actual date serial, not a "DD/MM/YYYY" string.
+EXCEL_DATE_FIELDS = ["fecha"]
 
 
 def _build_data_columns(ws) -> dict:
@@ -694,9 +987,22 @@ def _normalize_extracted(
     _, concepto_id = _match_catalog_label(
         str(extracted.get("concepto", "") or ""), concepto_catalog or []
     )
+
+    # "Tipo de Pago Id" is a required field for the destination CRM, so it
+    # must NEVER be left blank once the client has a Tipo de Pago catalog
+    # selected. Try the LLM's dedicated guess first, then fall back to
+    # matching the raw "metodo_de_pago" text, and finally default to the
+    # first catalog entry so we always emit a valid id.
     _, tipo_de_pago_id = _match_catalog_label(
         str(extracted.get("tipo_de_pago_erp", "") or ""), tipo_de_pago_catalog or []
     )
+    if tipo_de_pago_id is None and tipo_de_pago_catalog:
+        _, tipo_de_pago_id = _match_catalog_label(
+            str(extracted.get("metodo_de_pago", "") or ""), tipo_de_pago_catalog
+        )
+    if tipo_de_pago_id is None and tipo_de_pago_catalog:
+        tipo_de_pago_id = tipo_de_pago_catalog[0]["document_id"]
+
     prepared = prepare_export_row({
         **extracted,
         "concepto_id": concepto_id,
@@ -837,6 +1143,11 @@ def process_with_gemini(
     max_retries: int = 3,
     concepto_catalog: Optional[list[dict]] = None,
     tipo_de_pago_catalog: Optional[list[dict]] = None,
+    concepto_document_comment: str = "",
+    tipo_de_pago_document_comment: str = "",
+    business_rules: Optional[list[dict]] = None,
+    tipo_de_gasto_context: Optional[list[dict]] = None,
+    tipo_de_gasto_document_comment: str = "",
 ) -> dict:
     """
     Process a single file (image or PDF) with the individual Gemma model.
@@ -849,12 +1160,33 @@ def process_with_gemini(
     {document_type, document_id, description} (already cleaned via
     _clean_catalog) used to classify the receipt into that client's Concepto
     / Tipo de Pago ERP ids dynamically.
+
+    concepto_document_comment / tipo_de_pago_document_comment: optional
+    document-level comments for extra context. "" when the document has none.
+
+    business_rules: optional per-client list of {rule_type, rule_value,
+    description} (from client_business_rules / business_rule_attributes,
+    already cleaned via _clean_business_rules) - free-form context to help
+    the AI make better decisions for this client, independent of the
+    Concepto/Tipo de Pago catalogs.
+
+    tipo_de_gasto_context / tipo_de_gasto_document_comment: optional
+    per-client document (any client_documents container the user picks,
+    already cleaned via _clean_document_context) used PURELY as context to
+    help choose among the FIXED tipo_de_gasto options - it never introduces
+    new tipo_de_gasto values.
     """
     import time
     import re
 
     catalog_block = _build_catalog_prompt_block(
-        concepto_catalog or [], tipo_de_pago_catalog or []
+        concepto_catalog or [], tipo_de_pago_catalog or [],
+        concepto_document_comment=concepto_document_comment,
+        tipo_de_pago_document_comment=tipo_de_pago_document_comment,
+    )
+    catalog_block += _build_business_rules_prompt_block(business_rules or [])
+    catalog_block += _build_tipo_de_gasto_context_block(
+        tipo_de_gasto_context or [], document_comment=tipo_de_gasto_document_comment
     )
 
     print(
@@ -979,6 +1311,11 @@ def process_batch_with_gemini(
     max_retries: int = 3,
     concepto_catalog: Optional[list[dict]] = None,
     tipo_de_pago_catalog: Optional[list[dict]] = None,
+    concepto_document_comment: str = "",
+    tipo_de_pago_document_comment: str = "",
+    business_rules: Optional[list[dict]] = None,
+    tipo_de_gasto_context: Optional[list[dict]] = None,
+    tipo_de_gasto_document_comment: str = "",
 ) -> List[dict]:
     """
     Process MULTIPLE files (images and/or PDFs) with the batch Gemini model in
@@ -991,6 +1328,19 @@ def process_batch_with_gemini(
     concepto_catalog / tipo_de_pago_catalog: optional per-client lists of
     {document_type, document_id, description} used to classify every
     document in the batch into that client's Concepto / Tipo de Pago ERP ids.
+
+    concepto_document_comment / tipo_de_pago_document_comment: optional
+    document-level comments for extra context. "" when the document has none.
+
+    business_rules: optional per-client list of {rule_type, rule_value,
+    description} (already cleaned via _clean_business_rules) - free-form
+    context to help the AI make better decisions for this client, applied to
+    every document in the batch.
+
+    tipo_de_gasto_context / tipo_de_gasto_document_comment: optional
+    per-client document (already cleaned via _clean_document_context) used
+    PURELY as context to help choose among the FIXED tipo_de_gasto options
+    for every document in the batch - it never introduces new values.
 
     Returns a list of normalized extracted-data dicts in the same order as
     input. Falls back to per-file processing if the batch call cannot be parsed
@@ -1040,7 +1390,13 @@ def process_batch_with_gemini(
         )
 
     catalog_block = _build_catalog_prompt_block(
-        concepto_catalog or [], tipo_de_pago_catalog or []
+        concepto_catalog or [], tipo_de_pago_catalog or [],
+        concepto_document_comment=concepto_document_comment,
+        tipo_de_pago_document_comment=tipo_de_pago_document_comment,
+    )
+    catalog_block += _build_business_rules_prompt_block(business_rules or [])
+    catalog_block += _build_tipo_de_gasto_context_block(
+        tipo_de_gasto_context or [], document_comment=tipo_de_gasto_document_comment
     )
     batch_keys = (
         "nombre, documento, ncf, ncf_afectado, tipo_de_suplidor, tipo_de_gasto, "
@@ -1183,6 +1539,11 @@ def process_batch_with_gemini(
             content, filename,
             concepto_catalog=concepto_catalog,
             tipo_de_pago_catalog=tipo_de_pago_catalog,
+            concepto_document_comment=concepto_document_comment,
+            tipo_de_pago_document_comment=tipo_de_pago_document_comment,
+            business_rules=business_rules,
+            tipo_de_gasto_context=tipo_de_gasto_context,
+            tipo_de_gasto_document_comment=tipo_de_gasto_document_comment,
         )
         for content, filename in files
     ]
@@ -1205,6 +1566,7 @@ def _fill_template_xls(rows: list) -> Path:
         EXCEL_TEXT_FIELDS,
         EXCEL_NUMERIC_FIELDS,
         EXCEL_INT_FIELDS,
+        date_fields=EXCEL_DATE_FIELDS,
     )
 
 
@@ -1228,6 +1590,11 @@ async def upload_file(
     file: UploadFile = File(...),
     concepto_catalog: Optional[str] = Form(None),
     tipo_de_pago_catalog: Optional[str] = Form(None),
+    concepto_document_comment: Optional[str] = Form(""),
+    tipo_de_pago_document_comment: Optional[str] = Form(""),
+    business_rules: Optional[str] = Form(None),
+    tipo_de_gasto_context: Optional[str] = Form(None),
+    tipo_de_gasto_document_comment: Optional[str] = Form(""),
 ):
     """
     Upload and process a receipt/invoice file (supports: PDF, PNG, JPG, JPEG).
@@ -1238,6 +1605,25 @@ async def upload_file(
     LLM is asked to classify the document into one of these ERP-specific
     options and the matching ERP id is written to Concepto Id / Tipo de Pago
     Id in the export.
+
+    concepto_document_comment / tipo_de_pago_document_comment: optional
+    document-level comments (the "comment" column on the client_documents
+    container itself, e.g. its "Gastos" group) that give the LLM extra
+    context on top of each catalog option's own description. Sent as "" when
+    the document has no comment, in which case behavior is unchanged.
+
+    business_rules: optional JSON-encoded array of {rule_type, rule_value,
+    description} for the client currently being scanned (see
+    client_business_rules / business_rule_attributes). Unlike the catalogs
+    above, these are free-form context (not classification options) that
+    help the LLM make better decisions for this specific client.
+
+    tipo_de_gasto_context / tipo_de_gasto_document_comment: optional
+    JSON-encoded array of {document_type, document_id, description} (and its
+    document-level comment) for a client_documents container the user picked
+    specifically to give the LLM context for THIS client when choosing among
+    the FIXED tipo_de_gasto options - it never introduces new tipo_de_gasto
+    values, only helps pick among the existing 11.
     """
     try:
         allowed_extensions = {'.pdf', '.png', '.jpg', '.jpeg'}
@@ -1257,20 +1643,42 @@ async def upload_file(
             f"hash={file_hash[:8]})"
         )
 
+        # NOTE: no duplicate detection here - this endpoint processes a
+        # single file with no siblings to compare against in the same
+        # request, and checking against persisted history would incorrectly
+        # block legitimate re-processing (e.g. retry/reevaluate, or
+        # re-scanning after a page reload). See /upload-batch for
+        # within-batch duplicate detection.
+
         concepto_list = _clean_catalog(_parse_catalog_param(concepto_catalog, "concepto_catalog"))
         tipo_de_pago_list = _clean_catalog(
             _parse_catalog_param(tipo_de_pago_catalog, "tipo_de_pago_catalog")
         )
-        
+        concepto_comment = (concepto_document_comment or "").strip()
+        tipo_de_pago_comment = (tipo_de_pago_document_comment or "").strip()
+        business_rules_list = _clean_business_rules(
+            _parse_catalog_param(business_rules, "business_rules")
+        )
+        tipo_de_gasto_context_list = _clean_document_context(
+            _parse_catalog_param(tipo_de_gasto_context, "tipo_de_gasto_context")
+        )
+        tipo_de_gasto_comment = (tipo_de_gasto_document_comment or "").strip()
+
         # Process with Gemini (rate limited to 5 concurrent)
         async with gemini_semaphore:
             extracted_data = await asyncio.to_thread(
                 process_with_gemini, file_content, file.filename,
                 concepto_catalog=concepto_list,
                 tipo_de_pago_catalog=tipo_de_pago_list,
+                concepto_document_comment=concepto_comment,
+                tipo_de_pago_document_comment=tipo_de_pago_comment,
+                business_rules=business_rules_list,
+                tipo_de_gasto_context=tipo_de_gasto_context_list,
+                tipo_de_gasto_document_comment=tipo_de_gasto_comment,
             )
         
         print(f"[INFO] [/upload] '{file.filename}' processed, score={extracted_data.get('score')}")
+
         populate_excel_template(extracted_data)
         
         # Save to history
@@ -1302,6 +1710,11 @@ async def upload_batch(
     files: List[UploadFile] = File(...),
     concepto_catalog: Optional[str] = Form(None),
     tipo_de_pago_catalog: Optional[str] = Form(None),
+    concepto_document_comment: Optional[str] = Form(""),
+    tipo_de_pago_document_comment: Optional[str] = Form(""),
+    business_rules: Optional[str] = Form(None),
+    tipo_de_gasto_context: Optional[str] = Form(None),
+    tipo_de_gasto_document_comment: Optional[str] = Form(""),
 ):
     """
     Upload and process MULTIPLE receipt/invoice files in a SINGLE Gemini API call.
@@ -1314,12 +1727,38 @@ async def upload_batch(
     {document_type, document_id, description} for the client currently being
     scanned. Applied to every file in the batch.
 
+    concepto_document_comment / tipo_de_pago_document_comment: optional
+    document-level comments applied to every file in the batch, sent as ""
+    when the document has no comment (behavior stays unchanged).
+
+    business_rules: optional JSON-encoded array of {rule_type, rule_value,
+    description} for the client currently being scanned (see
+    client_business_rules / business_rule_attributes), applied to every file
+    in the batch as free-form context for the LLM.
+
+    tipo_de_gasto_context / tipo_de_gasto_document_comment: optional
+    JSON-encoded array of {document_type, document_id, description} (and its
+    document-level comment) for a client_documents container picked
+    specifically to help the LLM choose among the FIXED tipo_de_gasto
+    options for every file in the batch - never introduces new values.
+
+    Duplicate detection: files are compared against OTHER FILES IN THIS SAME
+    BATCH only (never against previously processed history, so re-scanning
+    the same document later - e.g. after a page reload - is never blocked).
+    A file is flagged "duplicate" (and excluded from the Excel export /
+    history) when either (a) its bytes are identical to another file in the
+    batch (exact hash match - the Gemini call is skipped entirely), or (b)
+    its extracted data matches another receipt in the batch by
+    NCF+documento (or, when no NCF is present, by documento/nombre + fecha +
+    montos).
+
     Returns:
         {
             "status": "success",
             "results": [
-                {"status": "success", "filename": "...", "hash": "...", "data": {...}},
-                {"status": "error",   "filename": "...", "message": "..."},
+                {"status": "success",   "filename": "...", "hash": "...", "data": {...}},
+                {"status": "duplicate", "filename": "...", "message": "...", "duplicate_of": "...", "data": {...}},
+                {"status": "error",     "filename": "...", "message": "..."},
                 ...
             ]
         }
@@ -1331,6 +1770,14 @@ async def upload_batch(
     print(f"[INFO] [/upload-batch] Received request with {len(files)} file(s)")
 
     allowed_extensions = {'.pdf', '.png', '.jpg', '.jpeg'}
+
+    # Duplicate-detection state, scoped to THIS batch only (not persisted
+    # history - see _new_dedupe_state), extended below as we walk the
+    # batch so exact file duplicates are caught WITHOUT wasting a Gemini
+    # call (e.g. the same receipt picked twice, or two files with identical
+    # bytes but different names, such as duplicate pages in a multi-page
+    # PDF that got split client-side).
+    seen_hashes, hash_to_filename, seen_keys, key_to_filename = _new_dedupe_state()
 
     # Read each upload and classify it. Pending entries will be sent to Gemini.
     entries: list = []
@@ -1368,10 +1815,29 @@ async def upload_batch(
                 f"bytes - the browser may have sent an empty body for this file."
             )
 
+        file_hash = calculate_file_hash(content)
+        if file_hash in seen_hashes:
+            duplicate_of = hash_to_filename.get(file_hash, "?")
+            print(
+                f"[INFO] [/upload-batch] '{filename}': duplicate of "
+                f"'{duplicate_of}' (identical file content) - skipping "
+                f"Gemini call"
+            )
+            entries.append({
+                "filename": filename,
+                "status": "duplicate",
+                "message": f"Archivo idéntico a '{duplicate_of}' (mismo contenido).",
+                "duplicate_of": duplicate_of,
+            })
+            continue
+
+        seen_hashes.add(file_hash)
+        hash_to_filename[file_hash] = filename
+
         entries.append({
             "filename": filename,
             "content": content,
-            "hash": calculate_file_hash(content),
+            "hash": file_hash,
             "status": "pending",
         })
 
@@ -1388,6 +1854,15 @@ async def upload_batch(
     tipo_de_pago_list = _clean_catalog(
         _parse_catalog_param(tipo_de_pago_catalog, "tipo_de_pago_catalog")
     )
+    concepto_comment = (concepto_document_comment or "").strip()
+    tipo_de_pago_comment = (tipo_de_pago_document_comment or "").strip()
+    business_rules_list = _clean_business_rules(
+        _parse_catalog_param(business_rules, "business_rules")
+    )
+    tipo_de_gasto_context_list = _clean_document_context(
+        _parse_catalog_param(tipo_de_gasto_context, "tipo_de_gasto_context")
+    )
+    tipo_de_gasto_comment = (tipo_de_gasto_document_comment or "").strip()
 
     extracted_results: List[dict] = []
     if batch_inputs:
@@ -1397,6 +1872,11 @@ async def upload_batch(
                 process_batch_with_gemini, batch_inputs,
                 concepto_catalog=concepto_list,
                 tipo_de_pago_catalog=tipo_de_pago_list,
+                concepto_document_comment=concepto_comment,
+                tipo_de_pago_document_comment=tipo_de_pago_comment,
+                business_rules=business_rules_list,
+                tipo_de_gasto_context=tipo_de_gasto_context_list,
+                tipo_de_gasto_document_comment=tipo_de_gasto_comment,
             )
 
     history = load_history()
@@ -1410,6 +1890,33 @@ async def upload_batch(
             else:
                 data = _empty_extracted(entry["filename"])
             extracted_idx += 1
+
+            # Duplicate check: different file bytes, but the extracted data
+            # (NCF/documento or fecha+montos) matches a receipt already
+            # counted - either earlier in this same batch or in a previous
+            # session. Exclude it from the export/history so it isn't
+            # double-counted, without failing the whole batch.
+            receipt_key = _receipt_identity_key(data)
+            if receipt_key and receipt_key in seen_keys:
+                duplicate_of = key_to_filename.get(receipt_key, "?")
+                print(
+                    f"[INFO] [/upload-batch] '{entry['filename']}': duplicate "
+                    f"of '{duplicate_of}' (matching extracted receipt data) - "
+                    f"excluding from export"
+                )
+                response_results.append({
+                    "status": "duplicate",
+                    "filename": entry["filename"],
+                    "hash": entry["hash"],
+                    "message": f"Mismos datos que '{duplicate_of}' (posible recibo duplicado).",
+                    "duplicate_of": duplicate_of,
+                    "data": data,
+                })
+                continue
+
+            if receipt_key:
+                seen_keys.add(receipt_key)
+                key_to_filename[receipt_key] = entry["filename"]
 
             try:
                 populate_excel_template(data)
@@ -1430,11 +1937,14 @@ async def upload_batch(
                 "data": data,
             })
         else:
-            response_results.append({
+            result_entry = {
                 "status": entry["status"],
                 "filename": entry["filename"],
                 "message": entry.get("message", "Unknown error"),
-            })
+            }
+            if "duplicate_of" in entry:
+                result_entry["duplicate_of"] = entry["duplicate_of"]
+            response_results.append(result_entry)
 
     save_history(history)
 

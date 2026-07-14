@@ -1,45 +1,43 @@
 import type { Database } from "~/types/database.types";
 
-export type ClientDocument =
-  Database["public"]["Tables"]["client_documents"]["Row"];
-export type DocumentAttribute =
-  Database["public"]["Tables"]["document_attributes"]["Row"];
+export type ClientBusinessRule =
+  Database["public"]["Tables"]["client_business_rules"]["Row"];
+export type BusinessRuleAttribute =
+  Database["public"]["Tables"]["business_rule_attributes"]["Row"];
 
-export type ClientDocumentWithAttributes = ClientDocument & {
-  document_attributes: DocumentAttribute[];
+export type ClientBusinessRuleWithAttributes = ClientBusinessRule & {
+  business_rule_attributes: BusinessRuleAttribute[];
 };
 
-export interface DocumentAttributeInput {
+export interface BusinessRuleAttributeInput {
   /** Existing DB id when updating; omit for new attributes. */
   id?: number;
-  documentType: string;
-  documentId: number | null;
+  ruleType: string;
+  ruleValue: string;
   description: string;
 }
 
-export interface ClientDocumentInput {
-  documentName: string;
-  /** Document-level context/notes for the LLM, on top of per-attribute comments. */
-  documentComment: string;
-  attributes: DocumentAttributeInput[];
+export interface ClientBusinessRuleInput {
+  ruleName: string;
+  attributes: BusinessRuleAttributeInput[];
 }
 
-export const useClientDocuments = () => {
+export const useClientBusinessRules = () => {
   const supabase = useSupabaseClient<Database>();
 
   async function listByClient(
     clientId: string
-  ): Promise<ClientDocumentWithAttributes[]> {
+  ): Promise<ClientBusinessRuleWithAttributes[]> {
     const { data, error } = await supabase
-      .from("client_documents")
-      .select("*, document_attributes(*)")
+      .from("client_business_rules")
+      .select("*, business_rule_attributes(*)")
       .eq("client_id", clientId)
       .order("created_at", { ascending: false });
     if (error) throw error;
 
-    return ((data ?? []) as ClientDocumentWithAttributes[]).map((doc) => ({
-      ...doc,
-      document_attributes: [...(doc.document_attributes ?? [])].sort(
+    return ((data ?? []) as ClientBusinessRuleWithAttributes[]).map((rule) => ({
+      ...rule,
+      business_rule_attributes: [...(rule.business_rule_attributes ?? [])].sort(
         (a, b) => a.id - b.id
       ),
     }));
@@ -47,19 +45,19 @@ export const useClientDocuments = () => {
 
   async function get(
     id: string
-  ): Promise<ClientDocumentWithAttributes | null> {
+  ): Promise<ClientBusinessRuleWithAttributes | null> {
     const { data, error } = await supabase
-      .from("client_documents")
-      .select("*, document_attributes(*)")
+      .from("client_business_rules")
+      .select("*, business_rule_attributes(*)")
       .eq("id", id)
       .maybeSingle();
     if (error) throw error;
     if (!data) return null;
 
-    const doc = data as ClientDocumentWithAttributes;
+    const rule = data as ClientBusinessRuleWithAttributes;
     return {
-      ...doc,
-      document_attributes: [...(doc.document_attributes ?? [])].sort(
+      ...rule,
+      business_rule_attributes: [...(rule.business_rule_attributes ?? [])].sort(
         (a, b) => a.id - b.id
       ),
     };
@@ -67,36 +65,35 @@ export const useClientDocuments = () => {
 
   async function create(
     clientId: string,
-    input: ClientDocumentInput
-  ): Promise<ClientDocumentWithAttributes> {
-    const documentName = input.documentName.trim();
-    if (!documentName) {
-      throw new Error("El nombre del documento es obligatorio.");
+    input: ClientBusinessRuleInput
+  ): Promise<ClientBusinessRuleWithAttributes> {
+    const ruleName = input.ruleName.trim();
+    if (!ruleName) {
+      throw new Error("El nombre de la regla es obligatorio.");
     }
 
     const attributes = normalizeAttributes(input.attributes);
     if (attributes.length === 0) {
-      throw new Error("Agrega al menos un atributo (concepto / tipo de pago).");
+      throw new Error("Agrega al menos una regla de negocio.");
     }
 
-    const { data: doc, error: docErr } = await supabase
-      .from("client_documents")
+    const { data: rule, error: ruleErr } = await supabase
+      .from("client_business_rules")
       .insert({
         client_id: clientId,
-        document_name: documentName,
-        comment: input.documentComment.trim() || null,
+        rule_name: ruleName,
       })
       .select("*")
       .single();
-    if (docErr) throw docErr;
+    if (ruleErr) throw ruleErr;
 
     const { data: attrs, error: attrErr } = await supabase
-      .from("document_attributes")
+      .from("business_rule_attributes")
       .insert(
         attributes.map((a) => ({
-          client_document_id: doc.id,
-          document_type: a.documentType,
-          document_id: a.documentId,
+          client_business_rule_id: rule.id,
+          rule_type: a.ruleType,
+          rule_value: a.ruleValue,
           description: a.description,
         }))
       )
@@ -104,44 +101,43 @@ export const useClientDocuments = () => {
 
     if (attrErr) {
       // Roll back the parent container if attributes fail.
-      await supabase.from("client_documents").delete().eq("id", doc.id);
+      await supabase.from("client_business_rules").delete().eq("id", rule.id);
       throw attrErr;
     }
 
     return {
-      ...(doc as ClientDocument),
-      document_attributes: (attrs ?? []) as DocumentAttribute[],
+      ...(rule as ClientBusinessRule),
+      business_rule_attributes: (attrs ?? []) as BusinessRuleAttribute[],
     };
   }
 
   async function update(
     id: string,
-    input: ClientDocumentInput
-  ): Promise<ClientDocumentWithAttributes> {
-    const documentName = input.documentName.trim();
-    if (!documentName) {
-      throw new Error("El nombre del documento es obligatorio.");
+    input: ClientBusinessRuleInput
+  ): Promise<ClientBusinessRuleWithAttributes> {
+    const ruleName = input.ruleName.trim();
+    if (!ruleName) {
+      throw new Error("El nombre de la regla es obligatorio.");
     }
 
     const attributes = normalizeAttributes(input.attributes);
     if (attributes.length === 0) {
-      throw new Error("Agrega al menos un atributo (concepto / tipo de pago).");
+      throw new Error("Agrega al menos una regla de negocio.");
     }
 
-    const { error: docErr } = await supabase
-      .from("client_documents")
+    const { error: ruleErr } = await supabase
+      .from("client_business_rules")
       .update({
-        document_name: documentName,
-        comment: input.documentComment.trim() || null,
+        rule_name: ruleName,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);
-    if (docErr) throw docErr;
+    if (ruleErr) throw ruleErr;
 
     const { data: existing, error: existingErr } = await supabase
-      .from("document_attributes")
+      .from("business_rule_attributes")
       .select("id")
-      .eq("client_document_id", id);
+      .eq("client_business_rule_id", id);
     if (existingErr) throw existingErr;
 
     const existingIds = new Set((existing ?? []).map((a) => a.id));
@@ -154,7 +150,7 @@ export const useClientDocuments = () => {
     const toDelete = [...existingIds].filter((attrId) => !keptIds.has(attrId));
     if (toDelete.length > 0) {
       const { error: delErr } = await supabase
-        .from("document_attributes")
+        .from("business_rule_attributes")
         .delete()
         .in("id", toDelete);
       if (delErr) throw delErr;
@@ -163,21 +159,21 @@ export const useClientDocuments = () => {
     for (const attr of attributes) {
       if (attr.id != null && existingIds.has(attr.id)) {
         const { error: updErr } = await supabase
-          .from("document_attributes")
+          .from("business_rule_attributes")
           .update({
-            document_type: attr.documentType,
-            document_id: attr.documentId,
+            rule_type: attr.ruleType,
+            rule_value: attr.ruleValue,
             description: attr.description,
           })
           .eq("id", attr.id);
         if (updErr) throw updErr;
       } else {
         const { error: insErr } = await supabase
-          .from("document_attributes")
+          .from("business_rule_attributes")
           .insert({
-            client_document_id: id,
-            document_type: attr.documentType,
-            document_id: attr.documentId,
+            client_business_rule_id: id,
+            rule_type: attr.ruleType,
+            rule_value: attr.ruleValue,
             description: attr.description,
           });
         if (insErr) throw insErr;
@@ -186,7 +182,7 @@ export const useClientDocuments = () => {
 
     const refreshed = await get(id);
     if (!refreshed) {
-      throw new Error("No se pudo recargar el documento actualizado.");
+      throw new Error("No se pudo recargar la regla actualizada.");
     }
     return refreshed;
   }
@@ -194,20 +190,20 @@ export const useClientDocuments = () => {
   async function updateAttributeDescription(
     attributeId: number,
     description: string
-  ): Promise<DocumentAttribute> {
+  ): Promise<BusinessRuleAttribute> {
     const { data, error } = await supabase
-      .from("document_attributes")
+      .from("business_rule_attributes")
       .update({ description: description.trim() || null })
       .eq("id", attributeId)
       .select("*")
       .single();
     if (error) throw error;
-    return data as DocumentAttribute;
+    return data as BusinessRuleAttribute;
   }
 
   async function remove(id: string): Promise<void> {
     const { error } = await supabase
-      .from("client_documents")
+      .from("client_business_rules")
       .delete()
       .eq("id", id);
     if (error) throw error;
@@ -224,19 +220,19 @@ export const useClientDocuments = () => {
 };
 
 function normalizeAttributes(
-  attributes: DocumentAttributeInput[]
+  attributes: BusinessRuleAttributeInput[]
 ): Array<{
   id?: number;
-  documentType: string;
-  documentId: number | null;
+  ruleType: string;
+  ruleValue: string | null;
   description: string | null;
 }> {
   return attributes
     .map((a) => ({
       id: a.id,
-      documentType: a.documentType.trim(),
-      documentId: a.documentId,
+      ruleType: a.ruleType.trim(),
+      ruleValue: a.ruleValue.trim() || null,
       description: a.description.trim() || null,
     }))
-    .filter((a) => a.documentType.length > 0);
+    .filter((a) => a.ruleType.length > 0);
 }

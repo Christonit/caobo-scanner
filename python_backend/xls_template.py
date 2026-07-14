@@ -10,28 +10,41 @@ dropdowns and named ranges are lost and the import "just does not work".
 
 There is no pure-Python library that can write a BIFF8 .xls while preserving
 data validations, so instead of rebuilding the file we edit the raw BIFF record
-stream of the template: we keep every record verbatim (SST, named ranges,
-DVAL/DV data-validation records, styles, the whole Nomencladores sheet) and only
+stream of the template: we keep every record verbatim (named ranges, DVAL/DV
+data-validation records, styles, the whole Nomencladores sheet) and only
 inject cell-value records for the receipt rows into the `Listado de Gastos`
 sheet. The result is byte-for-byte the original template plus our data rows.
+
+Text cells are written as LABELSST records referencing the workbook's shared
+string table (SST), which we extend with any new strings, rather than as raw
+LABEL records. LABEL (0x0204) is a legacy BIFF2-BIFF7 record; real BIFF8
+writers always use LABELSST, and stricter readers (e.g. Apple Numbers) may
+silently ignore LABEL cells in a BIFF8 stream, making rows appear empty even
+though the bytes are technically present.
 
 Approach:
   * read the raw `Workbook` OLE stream (via xlrd's compound-doc reader),
   * parse it into (record_id, payload) tuples,
+  * decode the existing SST (+ CONTINUE) into its ordered list of unique
+    strings, and rebuild it (via xlwt's own SharedStringTable, which handles
+    the 8224-byte CONTINUE splitting rules correctly) with our new strings
+    appended, preserving every existing string's index,
   * in the target worksheet substream: drop the placeholder blank rows (row >= 1)
     plus the optional INDEX/DBCELL offset tables, update DIMENSIONS, and insert
-    LABEL/NUMBER cell records for each receipt row,
+    ROW + LABELSST/NUMBER cell records for each receipt row,
   * recompute the BOUNDSHEET stream offsets (they shift when we resize the
-    first sheet) and re-serialize,
+    first sheet and the SST) and re-serialize,
   * wrap the new stream back into an OLE2 container (via xlwt's CompoundDoc).
 """
 import struct
+from datetime import datetime
 from pathlib import Path
 
 import xlrd
+import xlrd.xldate
 from xlrd.compdoc import CompDoc
+from xlwt.BIFFRecords import SharedStringTable
 from xlwt.CompoundDoc import XlsDoc
-from xlwt.UnicodeUtils import upack2
 
 
 # --- BIFF record ids -------------------------------------------------------
@@ -43,8 +56,11 @@ WINDOW2 = 0x023E
 INDEX = 0x020B
 DBCELL = 0x00D7
 ROW = 0x0208
-LABEL = 0x0204
 NUMBER = 0x0203
+SST = 0x00FC
+CONTINUE = 0x003C
+EXTSST = 0x00FF
+LABELSST = 0x00FD
 
 # Fallback ROW tail (height_options, unused, unused, options) used only when
 # the template has no existing data row to copy the format from. 0x8000 in
@@ -70,6 +86,25 @@ ROW_SCOPED_RECORDS = frozenset({
 # Optional performance/offset tables; we drop them so we never have to keep
 # their byte offsets in sync after resizing the cell table.
 DROP_ALWAYS_RECORDS = frozenset({INDEX, DBCELL})
+
+# Cell comments ("Notes") on the header row. Each one is stored as a group of
+# MSODRAWING (shape) + OBJ (object properties, type=Comment) + optional
+# MSODRAWING continuation + TXO (comment text) + CONTINUE (text runs) + NOTE
+# (0x1C, author/visibility) records. They are NOT referenced by DVAL (its
+# objid is 0xFFFFFFFF - the dropdowns don't use a shared combobox object), so
+# they carry no functional data-validation role; they're purely instructional
+# tooltips on the header cells. Apple Numbers' BIFF8 reader appears to choke
+# on this record group and silently stops rendering every row that follows in
+# the stream (the header renders fine because it comes first) - so we strip
+# them entirely. CONTINUE only appears in this sheet substream as part of
+# these comment groups (the SST's own CONTINUE records live in the separate
+# globals substream and are handled independently), so dropping every
+# CONTINUE here is safe.
+MSODRAWING = 0x00EC
+OBJ = 0x005D
+TXO = 0x01B6
+NOTE = 0x001C
+DROP_ALWAYS_RECORDS |= {MSODRAWING, OBJ, TXO, NOTE, CONTINUE}
 
 
 def _parse_records(stream: bytes) -> list:
@@ -117,8 +152,8 @@ def _boundsheet_name(payload: bytes) -> str:
     return raw[:cch].decode("latin-1", "replace")
 
 
-def _label_record(row: int, col: int, xf: int, text: str) -> list:
-    return [LABEL, struct.pack("<3H", row, col, xf) + upack2(text)]
+def _labelsst_record(row: int, col: int, xf: int, sst_index: int) -> list:
+    return [LABELSST, struct.pack("<3HI", row, col, xf, sst_index)]
 
 
 def _number_record(row: int, col: int, xf: int, value: float) -> list:
@@ -128,6 +163,51 @@ def _number_record(row: int, col: int, xf: int, value: float) -> list:
 def _row_record(row_idx: int, first_col: int, last_col: int, tail: bytes) -> list:
     """Build a ROW record reusing the template's own height/options tail."""
     return [ROW, struct.pack("<3H", row_idx, first_col, last_col + 1) + tail]
+
+
+def _decode_sst(records: list, start: int, end: int):
+    """
+    Locate the SST record (+ its immediately following CONTINUE records) in
+    records[start:end+1], and decode it into (total_count, ordered unique
+    strings, sst_record_start_idx, sst_block_end_idx_exclusive).
+
+    Assumes no rich-text / Asian-phonetic runs on any string (true for this
+    template - plain labels only); raises if that assumption doesn't hold, so
+    we fail loudly instead of silently corrupting strings we can't preserve.
+    """
+    sst_idx = None
+    for idx in range(start, end + 1):
+        if records[idx][0] == SST:
+            sst_idx = idx
+            break
+    if sst_idx is None:
+        raise ValueError("Template .xls globals have no SST record")
+
+    buf = records[sst_idx][1]
+    block_end = sst_idx + 1
+    while block_end <= end and records[block_end][0] == CONTINUE:
+        buf += records[block_end][1]
+        block_end += 1
+
+    total, unique_count = struct.unpack("<II", buf[:8])
+    cursor = 8
+    strings = []
+    for _ in range(unique_count):
+        cch = struct.unpack("<H", buf[cursor:cursor + 2])[0]
+        grbit = buf[cursor + 2]
+        cursor += 3
+        if grbit & 0x08 or grbit & 0x04:
+            raise ValueError(
+                "Template SST contains rich-text/phonetic strings; "
+                "xls_template only supports plain strings"
+            )
+        is_wide = grbit & 0x01
+        char_bytes = (2 * cch) if is_wide else cch
+        raw = buf[cursor:cursor + char_bytes]
+        cursor += char_bytes
+        strings.append(raw.decode("utf-16-le") if is_wide else raw.decode("latin-1"))
+
+    return total, strings, sst_idx, block_end
 
 
 def _read_template_layout(template_path: Path, field_mappings: dict):
@@ -170,7 +250,18 @@ def _read_template_layout(template_path: Path, field_mappings: dict):
                 xf = None
         xf_by_col[col] = xf if xf else 15
 
-    return sheet.name, data_columns, xf_by_col, sheet.ncols
+    return sheet.name, data_columns, xf_by_col, sheet.ncols, book.datemode
+
+
+def _parse_ddmmyyyy(text: str):
+    """Parse a 'DD/MM/YYYY' string (our normalized fecha format) into a date."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%d/%m/%Y").date()
+    except ValueError:
+        return None
 
 
 def fill_xls_template(
@@ -181,22 +272,27 @@ def fill_xls_template(
     text_fields,
     numeric_fields,
     int_fields,
+    date_fields=(),
 ) -> Path:
     """
     Write `out_path` as a copy of the template `.xls` with `rows` filled into the
     first worksheet, preserving every dropdown, named range and other sheet.
 
     `rows` must already be normalized (see server.prepare_export_row). Text
-    fields are written as inline string cells, numeric fields as number cells,
-    and integer id fields only when present.
+    fields are written as LABELSST string cells, numeric fields as number
+    cells, integer id fields only when present, and date fields (values must
+    be 'DD/MM/YYYY' strings) as real Excel date serials - the destination CRM
+    validates the Fecha column as an actual date type, not free text, and the
+    template's own column formatting (e.g. 'm/d/yy') confirms this.
     """
     template_path = Path(template_path)
     out_path = Path(out_path)
     text_fields = set(text_fields)
     numeric_fields = set(numeric_fields)
     int_fields = set(int_fields)
+    date_fields = set(date_fields)
 
-    target_name, data_columns, xf_by_col, header_cols = _read_template_layout(
+    target_name, data_columns, xf_by_col, header_cols, datemode = _read_template_layout(
         template_path, field_mappings
     )
 
@@ -211,8 +307,9 @@ def fill_xls_template(
     if len(subs) < 2:
         raise ValueError("Template .xls has no worksheet substreams")
 
+    globals_start, globals_end = subs[0]
     boundsheet_idxs = [
-        i for i in range(subs[0][0], subs[0][1] + 1) if records[i][0] == BOUNDSHEET
+        i for i in range(globals_start, globals_end + 1) if records[i][0] == BOUNDSHEET
     ]
 
     # Pick the worksheet substream matching the target sheet name (default: the
@@ -223,6 +320,24 @@ def fill_xls_template(
             target_ordinal = ordinal
             break
     sheet_start, sheet_end = subs[1 + target_ordinal]
+
+    # Decode the existing shared string table and re-load it into a fresh
+    # xlwt SharedStringTable so we can append new strings while (a) reusing
+    # xlwt's correct CONTINUE-splitting logic and (b) keeping every existing
+    # string's index stable (add_str assigns indices in first-seen order, and
+    # we add the existing strings back in their original order first).
+    original_total, existing_strings, sst_start, sst_block_end = _decode_sst(
+        records, globals_start, globals_end
+    )
+    sst = SharedStringTable(encoding="utf-8")
+    for expected_idx, s in enumerate(existing_strings):
+        actual_idx = sst.add_str(s)
+        if actual_idx != expected_idx:
+            raise ValueError(
+                "Template SST has duplicate unique strings; cannot safely "
+                "preserve existing LABELSST references"
+            )
+    new_cell_string_count = 0
 
     # Capture an existing data-row ROW record's tail (height_options, unused,
     # unused, options) so injected rows keep the template's row formatting.
@@ -247,11 +362,21 @@ def fill_xls_template(
             value = data.get(field)
             for col in cols:
                 xf = xf_by_col.get(col, 15)
-                if field in text_fields:
+                if field in date_fields:
+                    parsed = _parse_ddmmyyyy(value)
+                    if parsed is None:
+                        continue
+                    serial = xlrd.xldate.xldate_from_date_tuple(
+                        (parsed.year, parsed.month, parsed.day), datemode
+                    )
+                    cells_for_row.append(_number_record(row_idx, col, xf, serial))
+                elif field in text_fields:
                     text = "" if value is None else str(value)
                     if text == "":
                         continue
-                    cells_for_row.append(_label_record(row_idx, col, xf, text))
+                    sst_index = sst.add_str(text)
+                    new_cell_string_count += 1
+                    cells_for_row.append(_labelsst_record(row_idx, col, xf, sst_index))
                 elif field in numeric_fields:
                     cells_for_row.append(_number_record(row_idx, col, xf, value or 0.0))
                 elif field in int_fields:
@@ -261,7 +386,10 @@ def fill_xls_template(
                 else:
                     if value in (None, ""):
                         continue
-                    cells_for_row.append(_label_record(row_idx, col, xf, str(value)))
+                    text = str(value)
+                    sst_index = sst.add_str(text)
+                    new_cell_string_count += 1
+                    cells_for_row.append(_labelsst_record(row_idx, col, xf, sst_index))
                 if col > max_used_col:
                     max_used_col = col
         row_cells.append((row_idx, cells_for_row))
@@ -270,6 +398,32 @@ def fill_xls_template(
     for row_idx, cells_for_row in row_cells:
         new_cells.append(_row_record(row_idx, 0, max_used_col, row_tail))
         new_cells.extend(cells_for_row)
+
+    # Rebuild the SST(+CONTINUE) block with the new strings appended, keeping
+    # the "total occurrence count" coherent: we added each existing unique
+    # string exactly once above (not once per original reference), so
+    # _add_calls currently undercounts; patch it back to
+    # original_total + (new cell string references).
+    sst._add_calls = original_total + new_cell_string_count
+    sst_bytes = sst.get_biff_record()
+    sst_records = _parse_records(sst_bytes)
+
+    # Splice the rebuilt SST(+CONTINUE) into the globals substream, in place
+    # of the original SST/CONTINUE block, and drop EXTSST (a stale
+    # string-lookup cache we're not bothering to recompute; it's optional).
+    rebuilt_globals = []
+    idx = globals_start
+    while idx <= globals_end:
+        rid, payload = records[idx]
+        if idx == sst_start:
+            rebuilt_globals.extend(sst_records)
+            idx = sst_block_end
+            continue
+        if rid == EXTSST:
+            idx += 1
+            continue
+        rebuilt_globals.append([rid, payload])
+        idx += 1
 
     # Rewrite the target worksheet substream:
     #   * drop INDEX/DBCELL and every cell/row record for rows >= 1,
@@ -305,7 +459,9 @@ def fill_xls_template(
     # Stitch the streams back together: globals + rebuilt target + other sheets.
     new_records = []
     for si, (s_start, s_end) in enumerate(subs):
-        if si == 1 + target_ordinal:
+        if si == 0:
+            new_records.extend(rebuilt_globals)
+        elif si == 1 + target_ordinal:
             new_records.extend(rebuilt)
         else:
             new_records.extend(records[s_start:s_end + 1])

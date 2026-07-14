@@ -1,6 +1,11 @@
 <template>
   <div class="min-h-screen px-8 py-8">
-    <div class="mx-auto flex max-w-6xl gap-8">
+    <div
+      class="mx-auto flex w-full gap-8"
+      :class="{
+        'max-w-6xl': files.length == 0,
+      }"
+    >
       <!-- Main column -->
       <div class="min-w-0 flex-1">
         <!-- Header -->
@@ -45,8 +50,8 @@
             <div>
               <h2 class="text-base font-semibold text-gray-900">Cliente</h2>
               <p class="mt-0.5 text-sm text-gray-500">
-                Selecciona el cliente y los documentos de ERP que se usarán
-                para clasificar Concepto Id y Tipo de Pago Id.
+                Selecciona el cliente y los documentos de ERP que se usarán para
+                clasificar Concepto Id y Tipo de Pago Id.
               </p>
             </div>
             <span
@@ -101,7 +106,9 @@
                 class="mt-1.5 text-xs text-gray-400"
               >
                 No hay clientes.
-                <NuxtLink to="/clientes" class="text-emerald-700 hover:underline"
+                <NuxtLink
+                  to="/clientes"
+                  class="text-emerald-700 hover:underline"
                   >Crea uno primero</NuxtLink
                 >.
               </p>
@@ -127,7 +134,11 @@
                       : "Selecciona un documento"
                   }}
                 </option>
-                <option v-for="doc in clientDocuments" :key="doc.id" :value="doc.id">
+                <option
+                  v-for="doc in clientDocuments"
+                  :key="doc.id"
+                  :value="doc.id"
+                >
                   {{ doc.document_name }} ({{ doc.document_attributes.length }}
                   atributos)
                 </option>
@@ -170,12 +181,54 @@
                       : "Selecciona un documento"
                   }}
                 </option>
-                <option v-for="doc in clientDocuments" :key="doc.id" :value="doc.id">
+                <option
+                  v-for="doc in clientDocuments"
+                  :key="doc.id"
+                  :value="doc.id"
+                >
                   {{ doc.document_name }} ({{ doc.document_attributes.length }}
                   atributos)
                 </option>
               </select>
             </div>
+          </div>
+
+          <div class="mt-4 border-t border-gray-100 pt-4">
+            <label
+              for="tipo-de-gasto-context-doc-select"
+              class="mb-1.5 block text-sm font-medium text-gray-700"
+            >
+              Documento de contexto para Tipo de Gasto
+              <span class="font-normal text-gray-400">(opcional)</span>
+            </label>
+            <select
+              id="tipo-de-gasto-context-doc-select"
+              v-model="selectedTipoDeGastoContextDocId"
+              :disabled="!selectedClientId || clientDocumentsLoading"
+              class="w-full max-w-md rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
+            >
+              <option value="">
+                {{
+                  clientDocumentsLoading
+                    ? "Cargando…"
+                    : "Sin contexto adicional"
+                }}
+              </option>
+              <option
+                v-for="doc in clientDocuments"
+                :key="doc.id"
+                :value="doc.id"
+              >
+                {{ doc.document_name }} ({{ doc.document_attributes.length }}
+                atributos)
+              </option>
+            </select>
+            <p class="mt-1.5 text-xs text-gray-400">
+              El "Tipo de Gasto" siempre se elige entre las 11 opciones fijas
+              de la app. Si seleccionas un documento aquí, sus atributos y
+              comentario se envían a la IA solo como contexto para ayudarla a
+              elegir mejor entre esas 11 opciones para este cliente.
+            </p>
           </div>
 
           <p
@@ -195,8 +248,8 @@
                 d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            Selecciona un cliente y sus documentos de Concepto Id / Tipo de
-            Pago Id antes de subir o procesar archivos.
+            Selecciona un cliente y sus documentos de Concepto Id / Tipo de Pago
+            Id antes de subir o procesar archivos.
           </p>
         </section>
 
@@ -368,13 +421,52 @@
         <!-- Scanned information table -->
         <section v-if="files.length > 0" class="mt-10">
           <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-base font-semibold text-gray-900">
-              Información escaneada
-              <span
-                class="ml-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500"
-                >{{ files.length }}</span
+            <div class="flex flex-wrap items-center gap-3">
+              <h2 class="text-base font-semibold text-gray-900">
+                Información escaneada
+              </h2>
+              <div
+                class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5"
               >
-            </h2>
+                <button
+                  type="button"
+                  class="rounded-md px-3 py-1 text-xs font-semibold transition"
+                  :class="
+                    tableView === 'active'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  "
+                  @click="tableView = 'active'"
+                >
+                  Activos
+                  <span
+                    class="ml-1 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500"
+                    >{{ activeFiles.length }}</span
+                  >
+                </button>
+                <button
+                  type="button"
+                  class="rounded-md px-3 py-1 text-xs font-semibold transition"
+                  :class="
+                    tableView === 'review_later'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  "
+                  @click="tableView = 'review_later'"
+                >
+                  Revisar más tarde
+                  <span
+                    class="ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                    :class="
+                      reviewLaterFiles.length
+                        ? 'bg-violet-100 text-violet-700'
+                        : 'bg-gray-100 text-gray-500'
+                    "
+                    >{{ reviewLaterFiles.length }}</span
+                  >
+                </button>
+              </div>
+            </div>
             <div class="relative">
               <svg
                 class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
@@ -398,6 +490,51 @@
             </div>
           </div>
 
+          <p
+            v-if="tableView === 'review_later'"
+            class="mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800"
+          >
+            Estas filas no se incluyen en el Excel de salida. Úsalas para
+            corregir errores que Citrus detecta al subir y vuelve a
+            <strong>Incluir</strong> cuando estén listas.
+          </p>
+
+          <!-- Bulk selection toolbar -->
+          <div
+            v-if="selectedCount > 0"
+            class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5"
+          >
+            <p class="text-sm font-medium text-emerald-900">
+              {{ selectedCount }} fila{{ selectedCount === 1 ? "" : "s" }}
+              seleccionada{{ selectedCount === 1 ? "" : "s" }}
+            </p>
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                v-if="tableView === 'active'"
+                type="button"
+                class="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-800"
+                @click="deferSelectedForLater"
+              >
+                Excluir y revisar más tarde
+              </button>
+              <button
+                v-else
+                type="button"
+                class="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-800"
+                @click="restoreSelectedFromLater"
+              >
+                Incluir de nuevo
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                @click="clearSelection"
+              >
+                Limpiar selección
+              </button>
+            </div>
+          </div>
+
           <div
             class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
           >
@@ -405,6 +542,21 @@
               <table class="w-full">
                 <thead class="border-b border-gray-200 bg-gray-50">
                   <tr>
+                    <th class="w-10 px-3 py-3 text-center">
+                      <input
+                        type="checkbox"
+                        class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                        :checked="allVisibleSelected"
+                        :indeterminate.prop="someVisibleSelected && !allVisibleSelected"
+                        :disabled="filteredFiles.length === 0"
+                        :title="
+                          allVisibleSelected
+                            ? 'Deseleccionar todas'
+                            : 'Seleccionar todas'
+                        "
+                        @change="toggleSelectAllVisible"
+                      />
+                    </th>
                     <th
                       v-for="col in columns"
                       :key="col"
@@ -421,11 +573,43 @@
                 </thead>
                 <tbody class="divide-y divide-gray-100">
                   <tr
-                    v-for="file in filteredFiles"
-                    :key="file.id"
-                    class="transition-colors hover:bg-gray-50"
-                    :class="{ 'bg-amber-50': isEdited(file) }"
+                    v-if="filteredFiles.length === 0"
+                    class="bg-white"
                   >
+                    <td
+                      :colspan="columns.length + 1"
+                      class="px-4 py-8 text-center text-sm text-gray-400"
+                    >
+                      {{
+                        tableView === "review_later"
+                          ? "No hay filas marcadas para revisar más tarde."
+                          : search.trim()
+                            ? "Ninguna fila coincide con la búsqueda."
+                            : "No hay filas activas."
+                      }}
+                    </td>
+                  </tr>
+                  <tr
+                    v-for="(file, index) in filteredFiles"
+                    :key="file.id"
+                    class="cursor-pointer transition-colors hover:bg-gray-50"
+                    :class="{
+                      'bg-amber-50': isEdited(file),
+                      'bg-emerald-50/60': isSelected(file.id),
+                    }"
+                    @click="onRowClick($event, file.id)"
+                  >
+                    <td class="px-3 py-2.5 text-center">
+                      <input
+                        type="checkbox"
+                        class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                        :checked="isSelected(file.id)"
+                        @change="toggleSelect(file.id)"
+                      />
+                    </td>
+                    <td class="px-4 py-2.5">
+                      <span class="text-sm text-gray-500">{{ index + 1 }}</span>
+                    </td>
                     <!-- File Name -->
                     <td class="px-4 py-2.5">
                       <input
@@ -447,8 +631,21 @@
                     <!-- Status -->
                     <td class="px-4 py-2.5">
                       <span
+                        v-if="file.reviewLater"
+                        class="inline-flex rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-semibold text-violet-700"
+                        title="Excluida del Excel — revisar más tarde"
+                      >
+                        Revisar más tarde
+                      </span>
+                      <span
+                        v-else
                         class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold"
                         :class="getStatusClasses(file.status)"
+                        :title="
+                          file.status === 'duplicate'
+                            ? file.duplicateMessage
+                            : undefined
+                        "
                       >
                         {{ getStatusLabel(file.status) }}
                       </span>
@@ -507,6 +704,11 @@
                         type="text"
                         v-model="file.editableData.ncf"
                         @focus="startEditing(file)"
+                        @blur="
+                          file.editableData.ncf = normalizeNcf(
+                            file.editableData.ncf,
+                          )
+                        "
                         class="w-36 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
                         placeholder="-"
                       />
@@ -518,11 +720,16 @@
                         v-model="file.editableData.ncf_afectado"
                         maxlength="11"
                         @focus="startEditing(file)"
+                        @blur="
+                          file.editableData.ncf_afectado = normalizeNcf(
+                            file.editableData.ncf_afectado,
+                          ).slice(0, 11)
+                        "
                         class="w-28 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
                         :class="{
-                          'ring-1 ring-amber-400': requiresNcfAfectado(
-                            file.editableData.ncf,
-                          ) && !file.editableData.ncf_afectado,
+                          'ring-1 ring-amber-400':
+                            requiresNcfAfectado(file.editableData.ncf) &&
+                            !file.editableData.ncf_afectado,
                         }"
                         placeholder="-"
                         :title="
@@ -700,12 +907,14 @@
                           v-if="
                             file.editableData.concepto_id !== null &&
                             !conceptoOptions.some(
-                              (o) => o.document_id === file.editableData.concepto_id,
+                              (o) =>
+                                o.document_id === file.editableData.concepto_id,
                             )
                           "
                           :value="file.editableData.concepto_id"
                         >
-                          Id {{ file.editableData.concepto_id }} (fuera de catálogo)
+                          Id {{ file.editableData.concepto_id }} (fuera de
+                          catálogo)
                         </option>
                         <option
                           v-for="opt in conceptoOptions"
@@ -728,12 +937,15 @@
                           v-if="
                             file.editableData.tipo_de_pago_id !== null &&
                             !tipoDePagoOptions.some(
-                              (o) => o.document_id === file.editableData.tipo_de_pago_id,
+                              (o) =>
+                                o.document_id ===
+                                file.editableData.tipo_de_pago_id,
                             )
                           "
                           :value="file.editableData.tipo_de_pago_id"
                         >
-                          Id {{ file.editableData.tipo_de_pago_id }} (fuera de catálogo)
+                          Id {{ file.editableData.tipo_de_pago_id }} (fuera de
+                          catálogo)
                         </option>
                         <option
                           v-for="opt in tipoDePagoOptions"
@@ -853,6 +1065,46 @@
                           </svg>
                         </button>
                         <button
+                          v-if="!file.reviewLater"
+                          @click="deferFileForLater(file)"
+                          class="rounded-lg p-2 text-violet-600 transition-colors hover:bg-violet-50"
+                          title="Excluir y revisar más tarde"
+                        >
+                          <svg
+                            class="h-5 w-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                          </svg>
+                        </button>
+                        <button
+                          v-else
+                          @click="restoreFileFromLater(file)"
+                          class="rounded-lg p-2 text-emerald-600 transition-colors hover:bg-emerald-50"
+                          title="Incluir de nuevo en el export"
+                        >
+                          <svg
+                            class="h-5 w-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                            />
+                          </svg>
+                        </button>
+                        <button
                           @click="removeFile(file)"
                           class="rounded-lg p-2 text-rose-500 transition-colors hover:bg-rose-50"
                           title="Eliminar"
@@ -883,7 +1135,9 @@
 
       <!-- Data sources side panel -->
       <aside v-if="files.length > 0" class="hidden w-72 flex-shrink-0 lg:block">
-        <div class="sticky top-8 space-y-4">
+        <div
+          class="sticky top-8 max-h-[calc(100vh-4rem)] space-y-4 overflow-y-auto pb-4"
+        >
           <h2 class="text-sm font-semibold text-gray-900">Data sources</h2>
 
           <div
@@ -964,7 +1218,7 @@
                 !canScan ||
                 processing ||
                 batchLimit.isLimited.value ||
-                files.every((f) => f.status !== 'pending')
+                files.every((f) => f.status !== 'pending' || f.reviewLater)
               "
               class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
               :title="
@@ -995,12 +1249,326 @@
               Descartar todos
             </button>
             <button
-              v-if="files.some((f) => f.status === 'done')"
+              v-if="baseExportableFilesCount > 0"
               @click="downloadExcel"
-              class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+              class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="exportableFilesCount === 0"
+              :title="
+                exportableFilesCount === 0
+                  ? 'Ninguna fila coincide con los filtros de exportación'
+                  : 'Descargar Excel'
+              "
             >
               Descargar Excel
+              <span class="ml-1 font-normal text-gray-400"
+                >({{ exportableFilesCount }})</span
+              >
             </button>
+          </div>
+
+          <!-- NCF strip options for Excel export -->
+          <div
+            class="space-y-3 rounded-xl border border-gray-200 bg-white px-4 py-3"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-gray-900">
+                  Remover nomenclaturas NCF
+                </p>
+                <p class="mt-0.5 text-xs text-gray-400">
+                  Al exportar, quita del inicio del valor las series tipadas
+                  (ej. B01 → 00222157). Los ceros que queden se conservan.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="stripNcfEnabled"
+                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                :class="stripNcfEnabled ? 'bg-emerald-600' : 'bg-gray-200'"
+                @click="stripNcfEnabled = !stripNcfEnabled"
+              >
+                <span
+                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"
+                  :class="stripNcfEnabled ? 'translate-x-5' : 'translate-x-0'"
+                />
+              </button>
+            </div>
+
+            <div v-if="stripNcfEnabled" class="space-y-3">
+              <div class="relative">
+                <label class="mb-1.5 block text-xs font-medium text-gray-500">
+                  Columnas del Excel
+                </label>
+                <button
+                  type="button"
+                  class="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-left text-sm text-gray-700 transition hover:border-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                  @click="stripNcfColumnDropdownOpen = !stripNcfColumnDropdownOpen"
+                >
+                  <span
+                    v-if="stripNcfColumns.length"
+                    class="flex flex-wrap gap-1"
+                  >
+                    <span
+                      v-for="key in stripNcfColumns"
+                      :key="key"
+                      class="inline-flex rounded-md bg-gray-100 px-1.5 py-0.5 text-xs font-semibold text-gray-700"
+                    >
+                      {{ stripNcfColumnLabel(key) }}
+                    </span>
+                  </span>
+                  <span v-else class="text-gray-400">Selecciona columnas…</span>
+                  <svg
+                    class="h-4 w-4 flex-shrink-0 text-gray-400 transition"
+                    :class="{ 'rotate-180': stripNcfColumnDropdownOpen }"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </button>
+                <div
+                  v-if="stripNcfColumnDropdownOpen"
+                  class="absolute left-0 right-0 z-20 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+                >
+                  <label
+                    v-for="col in STRIP_NCF_COLUMN_OPTIONS"
+                    :key="col.key"
+                    class="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                      :checked="stripNcfColumns.includes(col.key)"
+                      @change="toggleStripNcfColumn(col.key)"
+                    />
+                    <span>{{ col.label }}</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label class="mb-1.5 block text-xs font-medium text-gray-500">
+                  Nomenclaturas
+                </label>
+                <div
+                  class="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 transition focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/40"
+                  @click="stripNcfInput?.focus()"
+                >
+                  <span
+                    v-for="prefix in stripNcfPrefixes"
+                    :key="prefix"
+                    class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-gray-700"
+                  >
+                    {{ prefix }}
+                    <button
+                      type="button"
+                      class="rounded text-gray-400 hover:text-gray-700"
+                      :title="`Quitar ${prefix}`"
+                      @click.stop="removeStripNcfPrefix(prefix)"
+                    >
+                      ×
+                    </button>
+                  </span>
+                  <input
+                    ref="stripNcfInput"
+                    v-model="stripNcfDraft"
+                    type="text"
+                    class="min-w-[5rem] flex-1 border-0 bg-transparent px-1 py-0.5 font-mono text-xs text-gray-700 outline-none placeholder:font-sans placeholder:text-gray-400"
+                    placeholder="Ej: B01 y Enter"
+                    @keydown="onStripNcfDraftKeydown"
+                    @blur="commitStripNcfDraft"
+                  />
+                </div>
+                <p class="mt-1 text-[11px] text-gray-400">
+                  Escribe la serie (B01, E31…) y pulsa Enter o coma.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Include-only filter for Excel export -->
+          <div
+            class="space-y-3 rounded-xl border border-gray-200 bg-white px-4 py-3"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-gray-900">
+                  Solo valores coincidentes
+                </p>
+                <p class="mt-0.5 text-xs text-gray-400">
+                  Exporta únicamente las filas cuyo valor en la columna
+                  elegida coincide con los tipados.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="exportIncludeEnabled"
+                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                :class="exportIncludeEnabled ? 'bg-emerald-600' : 'bg-gray-200'"
+                @click="exportIncludeEnabled = !exportIncludeEnabled"
+              >
+                <span
+                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"
+                  :class="
+                    exportIncludeEnabled ? 'translate-x-5' : 'translate-x-0'
+                  "
+                />
+              </button>
+            </div>
+
+            <div v-if="exportIncludeEnabled" class="space-y-3">
+              <div>
+                <label class="mb-1.5 block text-xs font-medium text-gray-500">
+                  Columna
+                </label>
+                <select
+                  v-model="exportIncludeColumn"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                >
+                  <option
+                    v-for="col in EXPORT_VALUE_FILTER_COLUMNS"
+                    :key="col.key"
+                    :value="col.key"
+                  >
+                    {{ col.label }}
+                  </option>
+                </select>
+              </div>
+              <div>
+                <label class="mb-1.5 block text-xs font-medium text-gray-500">
+                  Valores a incluir
+                </label>
+                <div
+                  class="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 transition focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/40"
+                  @click="exportIncludeInput?.focus()"
+                >
+                  <span
+                    v-for="value in exportIncludeValues"
+                    :key="value"
+                    class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-gray-700"
+                  >
+                    {{ value }}
+                    <button
+                      type="button"
+                      class="rounded text-gray-400 hover:text-gray-700"
+                      :title="`Quitar ${value}`"
+                      @click.stop="removeExportIncludeValue(value)"
+                    >
+                      ×
+                    </button>
+                  </span>
+                  <input
+                    ref="exportIncludeInput"
+                    v-model="exportIncludeDraft"
+                    type="text"
+                    class="min-w-[5rem] flex-1 border-0 bg-transparent px-1 py-0.5 font-mono text-xs text-gray-700 outline-none placeholder:font-sans placeholder:text-gray-400"
+                    placeholder="Ej: 122029818"
+                    @keydown="onExportIncludeDraftKeydown"
+                    @blur="commitExportIncludeDraft"
+                  />
+                </div>
+                <p class="mt-1 text-[11px] text-gray-400">
+                  Escribe el valor y pulsa Enter o coma.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Exclude filter for Excel export -->
+          <div
+            class="space-y-3 rounded-xl border border-gray-200 bg-white px-4 py-3"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-gray-900">
+                  Excluir valores coincidentes
+                </p>
+                <p class="mt-0.5 text-xs text-gray-400">
+                  Omite del Excel las filas cuyo valor en la columna elegida
+                  coincide con los tipados.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="exportExcludeEnabled"
+                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                :class="exportExcludeEnabled ? 'bg-emerald-600' : 'bg-gray-200'"
+                @click="exportExcludeEnabled = !exportExcludeEnabled"
+              >
+                <span
+                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"
+                  :class="
+                    exportExcludeEnabled ? 'translate-x-5' : 'translate-x-0'
+                  "
+                />
+              </button>
+            </div>
+
+            <div v-if="exportExcludeEnabled" class="space-y-3">
+              <div>
+                <label class="mb-1.5 block text-xs font-medium text-gray-500">
+                  Columna
+                </label>
+                <select
+                  v-model="exportExcludeColumn"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                >
+                  <option
+                    v-for="col in EXPORT_VALUE_FILTER_COLUMNS"
+                    :key="col.key"
+                    :value="col.key"
+                  >
+                    {{ col.label }}
+                  </option>
+                </select>
+              </div>
+              <div>
+                <label class="mb-1.5 block text-xs font-medium text-gray-500">
+                  Valores a excluir
+                </label>
+                <div
+                  class="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 transition focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/40"
+                  @click="exportExcludeInput?.focus()"
+                >
+                  <span
+                    v-for="value in exportExcludeValues"
+                    :key="value"
+                    class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-gray-700"
+                  >
+                    {{ value }}
+                    <button
+                      type="button"
+                      class="rounded text-gray-400 hover:text-gray-700"
+                      :title="`Quitar ${value}`"
+                      @click.stop="removeExportExcludeValue(value)"
+                    >
+                      ×
+                    </button>
+                  </span>
+                  <input
+                    ref="exportExcludeInput"
+                    v-model="exportExcludeDraft"
+                    type="text"
+                    class="min-w-[5rem] flex-1 border-0 bg-transparent px-1 py-0.5 font-mono text-xs text-gray-700 outline-none placeholder:font-sans placeholder:text-gray-400"
+                    placeholder="Ej: 122029818"
+                    @keydown="onExportExcludeDraftKeydown"
+                    @blur="commitExportExcludeDraft"
+                  />
+                </div>
+                <p class="mt-1 text-[11px] text-gray-400">
+                  Escribe el valor y pulsa Enter o coma.
+                </p>
+              </div>
+            </div>
           </div>
 
           <p
@@ -1098,17 +1666,60 @@
         </div>
       </div>
     </Transition>
+
+    <!-- Leave confirmation: scan progress is not persisted -->
+    <div
+      v-if="leaveConfirmOpen"
+      class="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="leave-confirm-title"
+    >
+      <div
+        class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl"
+      >
+        <h2
+          id="leave-confirm-title"
+          class="text-lg font-semibold text-gray-900"
+        >
+          ¿Salir sin guardar?
+        </h2>
+        <p class="mt-2 text-sm text-gray-600">
+          Ya procesaste documentos en esta sesión. El progreso del escaneo
+          <strong class="font-semibold text-gray-800">no se ha almacenado</strong>
+          y se perderá si sales o recargas la página.
+        </p>
+        <div class="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+            @click="cancelLeave"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
+            @click="confirmLeave"
+          >
+            Salir de todos modos
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, markRaw } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount, markRaw } from "vue";
+import { onBeforeRouteLeave } from "vue-router";
 
 const API_BASE = useApiBase();
 
 // --- Client + ERP catalog selection (mandatory before scanning) ----------
 const { list: listClients } = useClients();
 const { listByClient } = useClientDocuments();
+const { listByClient: listBusinessRulesByClient } = useClientBusinessRules();
 
 const clients = ref([]);
 const clientsLoading = ref(false);
@@ -1117,16 +1728,25 @@ const clientsError = ref(null);
 const selectedClientId = ref("");
 const selectedConceptoDocId = ref("");
 const selectedTipoDePagoDocId = ref("");
+// Optional - a client document picked purely to give the AI context when
+// choosing among the FIXED tipo_de_gasto options (never adds new values).
+const selectedTipoDeGastoContextDocId = ref("");
 
 const clientDocuments = ref([]);
 const clientDocumentsLoading = ref(false);
 const clientDocumentsError = ref(null);
 
+// Optional, client-level business rules (see "Anotaciones del Negocio" on
+// the client detail page) - free-form context sent to the AI on top of the
+// Concepto/Tipo de Pago catalogs, independent of which documents are
+// selected above.
+const clientBusinessRules = ref([]);
+
 const canScan = computed(() =>
   Boolean(
     selectedClientId.value &&
-      selectedConceptoDocId.value &&
-      selectedTipoDePagoDocId.value,
+    selectedConceptoDocId.value &&
+    selectedTipoDePagoDocId.value,
   ),
 );
 
@@ -1163,6 +1783,55 @@ const tipoDePagoCatalogPayload = computed(() =>
   })),
 );
 
+// Document-level comments (set on the "Gastos"/"Tipo de Pago" containers
+// themselves, on top of each attribute's own comment) give the LLM broader
+// context for classification. Always sent, "" when the document has none,
+// so the prompt behaves exactly as before when no comment was set.
+const conceptoDocumentComment = computed(() => {
+  const doc = clientDocuments.value.find(
+    (d) => d.id === selectedConceptoDocId.value,
+  );
+  return doc?.comment || "";
+});
+const tipoDePagoDocumentComment = computed(() => {
+  const doc = clientDocuments.value.find(
+    (d) => d.id === selectedTipoDePagoDocId.value,
+  );
+  return doc?.comment || "";
+});
+
+// Tipo de Gasto context document: unlike conceptoOptions/tipoDePagoOptions,
+// EVERY attribute is kept (no ERP-id filter) since this is just free-form
+// context to help pick among the fixed TIPO_DE_GASTO_OPTIONS, not a set of
+// valid output values with their own ERP id.
+const tipoDeGastoContextDoc = computed(() =>
+  clientDocuments.value.find(
+    (d) => d.id === selectedTipoDeGastoContextDocId.value,
+  ),
+);
+const tipoDeGastoContextPayload = computed(() =>
+  (tipoDeGastoContextDoc.value?.document_attributes ?? []).map((a) => ({
+    document_type: a.document_type,
+    document_id: a.document_id,
+    description: a.description || "",
+  })),
+);
+const tipoDeGastoDocumentComment = computed(
+  () => tipoDeGastoContextDoc.value?.comment || "",
+);
+
+// Flatten every rule group's attributes into a single list for the prompt -
+// the AI doesn't need the grouping, just the combined context.
+const businessRulesPayload = computed(() =>
+  clientBusinessRules.value.flatMap((rule) =>
+    (rule.business_rule_attributes ?? []).map((a) => ({
+      rule_type: a.rule_type,
+      rule_value: a.rule_value || "",
+      description: a.description || "",
+    })),
+  ),
+);
+
 const loadClients = async () => {
   clientsLoading.value = true;
   clientsError.value = null;
@@ -1175,10 +1844,14 @@ const loadClients = async () => {
   }
 };
 
-const onClientChange = async () => {
-  selectedConceptoDocId.value = "";
-  selectedTipoDePagoDocId.value = "";
+// Fetch documents/business rules for the currently selected client.
+// `preferredSelection`, when provided (restoring from localStorage), tries
+// to re-apply previously chosen document ids once the fresh document list
+// is in - but only the ones that still exist for this client; anything
+// stale/missing is simply left at its default ("").
+const loadClientDocumentsAndRules = async (preferredSelection = null) => {
   clientDocuments.value = [];
+  clientBusinessRules.value = [];
   if (!selectedClientId.value) return;
 
   clientDocumentsLoading.value = true;
@@ -1191,13 +1864,105 @@ const onClientChange = async () => {
   } finally {
     clientDocumentsLoading.value = false;
   }
+
+  if (preferredSelection) {
+    const availableIds = new Set(clientDocuments.value.map((d) => d.id));
+    if (availableIds.has(preferredSelection.conceptoDocId)) {
+      selectedConceptoDocId.value = preferredSelection.conceptoDocId;
+    }
+    if (availableIds.has(preferredSelection.tipoDePagoDocId)) {
+      selectedTipoDePagoDocId.value = preferredSelection.tipoDePagoDocId;
+    }
+    if (availableIds.has(preferredSelection.tipoDeGastoContextDocId)) {
+      selectedTipoDeGastoContextDocId.value =
+        preferredSelection.tipoDeGastoContextDocId;
+    }
+  }
+
+  // Business rules are optional context - fail silently so a missing/empty
+  // rules setup never blocks scanning.
+  try {
+    clientBusinessRules.value = await listBusinessRulesByClient(
+      selectedClientId.value,
+    );
+  } catch (err) {
+    console.warn("[Business rules] No se pudieron cargar:", err);
+  }
 };
+
+const onClientChange = () => {
+  selectedConceptoDocId.value = "";
+  selectedTipoDePagoDocId.value = "";
+  selectedTipoDeGastoContextDocId.value = "";
+  loadClientDocumentsAndRules();
+};
+
+// --- Client/document selection persistence (localStorage) -----------------
+// Remembers the last selected client + Concepto/Tipo de Pago/Tipo de Gasto
+// documents across reloads, purely as a convenience. If nothing was saved
+// (or storage is unavailable), everything simply keeps its default ("")
+// and the user picks a client as before - no client is ever assumed.
+const CLIENT_SELECTION_KEY = "rcp_client_selection";
+
+const loadStoredClientSelection = () => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(CLIENT_SELECTION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const persistClientSelection = () => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      CLIENT_SELECTION_KEY,
+      JSON.stringify({
+        clientId: selectedClientId.value || "",
+        conceptoDocId: selectedConceptoDocId.value || "",
+        tipoDePagoDocId: selectedTipoDePagoDocId.value || "",
+        tipoDeGastoContextDocId: selectedTipoDeGastoContextDocId.value || "",
+      }),
+    );
+  } catch {
+    /* localStorage unavailable (private mode, quota) - silently ignore */
+  }
+};
+
+const restoreClientSelection = () => {
+  const stored = loadStoredClientSelection();
+  if (!stored?.clientId) return; // Nothing saved - keep the default (empty) state.
+  selectedClientId.value = stored.clientId;
+  loadClientDocumentsAndRules({
+    conceptoDocId: stored.conceptoDocId || "",
+    tipoDePagoDocId: stored.tipoDePagoDocId || "",
+    tipoDeGastoContextDocId: stored.tipoDeGastoContextDocId || "",
+  });
+};
+
+watch(
+  [
+    selectedClientId,
+    selectedConceptoDocId,
+    selectedTipoDePagoDocId,
+    selectedTipoDeGastoContextDocId,
+  ],
+  persistClientSelection,
+);
 
 // --- UI state -------------------------------------------------------------
 const addFilesOpen = ref(true);
 const search = ref("");
+// 'active' = rows that go to Excel; 'review_later' = excluded for later fix-up
+const tableView = ref("active");
+const selectedFileIds = ref(new Set());
 
 const columns = [
+  "#",
   "File Name",
   "Type",
   "Status",
@@ -1250,9 +2015,441 @@ const TIPO_DE_GASTO_OPTIONS = [
 
 const requiresNcfAfectado = (ncf) => {
   const value = String(ncf || "")
-    .trim()
-    .toUpperCase();
+    .replace(/\s+/g, "")
+    .toUpperCase()
+    .replace(/^0+/, "");
   return value.startsWith("B03") || value.startsWith("B04");
+};
+
+// Excel columns this filter can target (labels match the export / template).
+const STRIP_NCF_COLUMN_OPTIONS = [
+  { key: "ncf", label: "NCF" },
+  { key: "ncf_afectado", label: "NCF Afectado" },
+  { key: "documento", label: "Documento" },
+  { key: "nombre", label: "Nombre" },
+  { key: "descripcion", label: "Descripcion" },
+];
+
+// Export-time strip settings: toggle + Excel columns + typed nomenclature tags.
+// Removes the typed series from the START of the value (and any OCR leading
+// zeros before it). Remaining characters — including zeros — are kept.
+//   "0000000B0100222157" + B01 → "00222157"
+//   "B0100222157"         + B01 → "00222157"
+//   "E310000633480"       + E31 → "0000633480"
+const STRIP_NCF_SETTINGS_KEY = "rcp_strip_ncf_settings";
+const stripNcfEnabled = ref(true);
+const stripNcfColumns = ref(["ncf"]);
+const stripNcfPrefixes = ref(["B01", "B02"]);
+const stripNcfDraft = ref("");
+const stripNcfInput = ref(null);
+const stripNcfColumnDropdownOpen = ref(false);
+
+const stripNcfColumnLabel = (key) =>
+  STRIP_NCF_COLUMN_OPTIONS.find((c) => c.key === key)?.label || key;
+
+const loadStripNcfSettings = () => {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(STRIP_NCF_SETTINGS_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.enabled === "boolean") {
+      stripNcfEnabled.value = parsed.enabled;
+    }
+    const validColumns = new Set(
+      STRIP_NCF_COLUMN_OPTIONS.map((c) => c.key),
+    );
+    // Migrate legacy single `column` string → `columns` array.
+    const rawColumns = Array.isArray(parsed?.columns)
+      ? parsed.columns
+      : parsed?.column
+        ? [parsed.column]
+        : null;
+    if (rawColumns) {
+      const cleaned = rawColumns.filter((c) => validColumns.has(c));
+      if (cleaned.length) stripNcfColumns.value = cleaned;
+    }
+    if (Array.isArray(parsed?.prefixes)) {
+      const cleaned = [
+        ...new Set(
+          parsed.prefixes
+            .map((p) => String(p || "").replace(/\s+/g, "").toUpperCase())
+            .filter(Boolean),
+        ),
+      ];
+      if (cleaned.length) stripNcfPrefixes.value = cleaned;
+    }
+  } catch {
+    /* ignore */
+  }
+};
+
+const persistStripNcfSettings = () => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      STRIP_NCF_SETTINGS_KEY,
+      JSON.stringify({
+        enabled: stripNcfEnabled.value,
+        columns: stripNcfColumns.value,
+        prefixes: stripNcfPrefixes.value,
+      }),
+    );
+  } catch {
+    /* ignore */
+  }
+};
+
+watch(
+  [stripNcfEnabled, stripNcfColumns, stripNcfPrefixes],
+  persistStripNcfSettings,
+  { deep: true },
+);
+
+watch(stripNcfEnabled, (enabled) => {
+  if (!enabled) stripNcfColumnDropdownOpen.value = false;
+});
+
+const toggleStripNcfColumn = (key) => {
+  const set = new Set(stripNcfColumns.value);
+  if (set.has(key)) set.delete(key);
+  else set.add(key);
+  stripNcfColumns.value = STRIP_NCF_COLUMN_OPTIONS.map((c) => c.key).filter(
+    (k) => set.has(k),
+  );
+};
+
+const addStripNcfPrefix = (raw) => {
+  const prefix = String(raw || "")
+    .replace(/\s+/g, "")
+    .toUpperCase();
+  if (!prefix) return;
+  if (!stripNcfPrefixes.value.includes(prefix)) {
+    stripNcfPrefixes.value = [...stripNcfPrefixes.value, prefix];
+  }
+};
+
+const removeStripNcfPrefix = (prefix) => {
+  stripNcfPrefixes.value = stripNcfPrefixes.value.filter((p) => p !== prefix);
+};
+
+const commitStripNcfDraft = () => {
+  const parts = String(stripNcfDraft.value || "")
+    .split(/[,;\s]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  parts.forEach(addStripNcfPrefix);
+  stripNcfDraft.value = "";
+};
+
+const onStripNcfDraftKeydown = (event) => {
+  if (event.key === "Enter" || event.key === ",") {
+    event.preventDefault();
+    commitStripNcfDraft();
+    return;
+  }
+  if (
+    event.key === "Backspace" &&
+    !stripNcfDraft.value &&
+    stripNcfPrefixes.value.length
+  ) {
+    removeStripNcfPrefix(
+      stripNcfPrefixes.value[stripNcfPrefixes.value.length - 1],
+    );
+  }
+};
+
+/** Uppercase / trim only — used for in-table editing. */
+const normalizeNcf = (value) => {
+  return String(value || "")
+    .replace(/\s+/g, "")
+    .toUpperCase();
+};
+
+/**
+ * Remove typed nomenclature prefixes from the start of a value for Excel
+ * export. Also drops OCR leading zeros that pad the prefix. Characters
+ * after the prefix (including zeros) are never altered.
+ */
+const stripNomenclaturesFromValue = (value, prefixes) => {
+  let text = normalizeNcf(value);
+  if (!prefixes?.length) return text;
+
+  // Longer prefixes first so "B01" wins over "B0", "E31" over "E3", etc.
+  const sorted = [...prefixes]
+    .map((p) => String(p || "").replace(/\s+/g, "").toUpperCase())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+
+  for (const prefix of sorted) {
+    const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // optional leading zeros + nomenclature at the start of the string
+    const re = new RegExp(`^0*${escaped}`);
+    if (re.test(text)) {
+      return text.replace(re, "");
+    }
+  }
+  return text;
+};
+
+/** Apply export strip settings to a single field value for selected columns. */
+const applyStripNcfForColumn = (fieldKey, value) => {
+  const cleaned = normalizeNcf(value);
+  if (
+    !stripNcfEnabled.value ||
+    !stripNcfColumns.value.includes(fieldKey) ||
+    !stripNcfPrefixes.value.length
+  ) {
+    return fieldKey === "ncf" || fieldKey === "ncf_afectado"
+      ? cleaned
+      : value;
+  }
+  const stripped = stripNomenclaturesFromValue(value, stripNcfPrefixes.value);
+  // Non-NCF columns keep original casing/spacing aside from the strip itself.
+  if (fieldKey !== "ncf" && fieldKey !== "ncf_afectado") {
+    return stripped;
+  }
+  return stripped;
+};
+
+// Columns available for include/exclude value filters on Excel export.
+const EXPORT_VALUE_FILTER_COLUMNS = [
+  { key: "documento", label: "Documento" },
+  { key: "ncf", label: "NCF" },
+  { key: "ncf_afectado", label: "NCF Afectado" },
+  { key: "nombre", label: "Nombre" },
+  { key: "descripcion", label: "Descripcion" },
+];
+
+const EXPORT_VALUE_FILTER_SETTINGS_KEY = "rcp_export_value_filters";
+
+const exportIncludeEnabled = ref(false);
+const exportIncludeColumn = ref("documento");
+const exportIncludeValues = ref([]);
+const exportIncludeDraft = ref("");
+const exportIncludeInput = ref(null);
+
+const exportExcludeEnabled = ref(false);
+const exportExcludeColumn = ref("documento");
+const exportExcludeValues = ref([]);
+const exportExcludeDraft = ref("");
+const exportExcludeInput = ref(null);
+
+/** Normalize a cell value for include/exclude matching (column-aware). */
+const normalizeExportFilterValue = (columnKey, value) => {
+  const text = String(value ?? "").trim();
+  if (columnKey === "documento") {
+    return text.replace(/\D/g, "");
+  }
+  if (columnKey === "ncf" || columnKey === "ncf_afectado") {
+    return text.replace(/\s+/g, "").toUpperCase();
+  }
+  return text.replace(/\s+/g, " ").toLowerCase();
+};
+
+const getFileExportFilterValue = (file, columnKey) => {
+  const d = file?.editableData || {};
+  if (columnKey === "documento") return d.documento;
+  if (columnKey === "ncf") return d.ncf;
+  if (columnKey === "ncf_afectado") return d.ncf_afectado;
+  if (columnKey === "nombre") return d.nombre;
+  if (columnKey === "descripcion") return d.descripcion;
+  return "";
+};
+
+const fileMatchesExportValues = (file, columnKey, values) => {
+  if (!values?.length) return false;
+  const cell = normalizeExportFilterValue(
+    columnKey,
+    getFileExportFilterValue(file, columnKey),
+  );
+  if (!cell) return false;
+  const set = new Set(
+    values
+      .map((v) => normalizeExportFilterValue(columnKey, v))
+      .filter(Boolean),
+  );
+  return set.has(cell);
+};
+
+/** Rows that would be written to Excel (done, not deferred, value filters). */
+const getExportableFiles = () => {
+  let rows = files.value.filter((f) => f.status === "done" && !f.reviewLater);
+
+  // Include filter active with no values → nothing to export (avoid surprise dumps).
+  if (exportIncludeEnabled.value) {
+    if (!exportIncludeValues.value.length) return [];
+    rows = rows.filter((f) =>
+      fileMatchesExportValues(
+        f,
+        exportIncludeColumn.value,
+        exportIncludeValues.value,
+      ),
+    );
+  }
+
+  if (exportExcludeEnabled.value && exportExcludeValues.value.length) {
+    rows = rows.filter(
+      (f) =>
+        !fileMatchesExportValues(
+          f,
+          exportExcludeColumn.value,
+          exportExcludeValues.value,
+        ),
+    );
+  }
+
+  return rows;
+};
+
+const loadExportValueFilterSettings = () => {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(EXPORT_VALUE_FILTER_SETTINGS_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    const validColumns = new Set(
+      EXPORT_VALUE_FILTER_COLUMNS.map((c) => c.key),
+    );
+
+    if (typeof parsed?.include?.enabled === "boolean") {
+      exportIncludeEnabled.value = parsed.include.enabled;
+    }
+    if (validColumns.has(parsed?.include?.column)) {
+      exportIncludeColumn.value = parsed.include.column;
+    }
+    if (Array.isArray(parsed?.include?.values)) {
+      exportIncludeValues.value = [
+        ...new Set(
+          parsed.include.values.map((v) => String(v || "").trim()).filter(Boolean),
+        ),
+      ];
+    }
+
+    if (typeof parsed?.exclude?.enabled === "boolean") {
+      exportExcludeEnabled.value = parsed.exclude.enabled;
+    }
+    if (validColumns.has(parsed?.exclude?.column)) {
+      exportExcludeColumn.value = parsed.exclude.column;
+    }
+    if (Array.isArray(parsed?.exclude?.values)) {
+      exportExcludeValues.value = [
+        ...new Set(
+          parsed.exclude.values.map((v) => String(v || "").trim()).filter(Boolean),
+        ),
+      ];
+    }
+  } catch {
+    /* ignore */
+  }
+};
+
+const persistExportValueFilterSettings = () => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      EXPORT_VALUE_FILTER_SETTINGS_KEY,
+      JSON.stringify({
+        include: {
+          enabled: exportIncludeEnabled.value,
+          column: exportIncludeColumn.value,
+          values: exportIncludeValues.value,
+        },
+        exclude: {
+          enabled: exportExcludeEnabled.value,
+          column: exportExcludeColumn.value,
+          values: exportExcludeValues.value,
+        },
+      }),
+    );
+  } catch {
+    /* ignore */
+  }
+};
+
+watch(
+  [
+    exportIncludeEnabled,
+    exportIncludeColumn,
+    exportIncludeValues,
+    exportExcludeEnabled,
+    exportExcludeColumn,
+    exportExcludeValues,
+  ],
+  persistExportValueFilterSettings,
+  { deep: true },
+);
+
+const addExportFilterValue = (listRef, raw) => {
+  const value = String(raw || "").trim();
+  if (!value) return;
+  if (!listRef.value.includes(value)) {
+    listRef.value = [...listRef.value, value];
+  }
+};
+
+const removeExportIncludeValue = (value) => {
+  exportIncludeValues.value = exportIncludeValues.value.filter(
+    (v) => v !== value,
+  );
+};
+
+const removeExportExcludeValue = (value) => {
+  exportExcludeValues.value = exportExcludeValues.value.filter(
+    (v) => v !== value,
+  );
+};
+
+const commitExportIncludeDraft = () => {
+  String(exportIncludeDraft.value || "")
+    .split(/[,;\n]+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .forEach((v) => addExportFilterValue(exportIncludeValues, v));
+  exportIncludeDraft.value = "";
+};
+
+const commitExportExcludeDraft = () => {
+  String(exportExcludeDraft.value || "")
+    .split(/[,;\n]+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .forEach((v) => addExportFilterValue(exportExcludeValues, v));
+  exportExcludeDraft.value = "";
+};
+
+const onExportIncludeDraftKeydown = (event) => {
+  if (event.key === "Enter" || event.key === ",") {
+    event.preventDefault();
+    commitExportIncludeDraft();
+    return;
+  }
+  if (
+    event.key === "Backspace" &&
+    !exportIncludeDraft.value &&
+    exportIncludeValues.value.length
+  ) {
+    removeExportIncludeValue(
+      exportIncludeValues.value[exportIncludeValues.value.length - 1],
+    );
+  }
+};
+
+const onExportExcludeDraftKeydown = (event) => {
+  if (event.key === "Enter" || event.key === ",") {
+    event.preventDefault();
+    commitExportExcludeDraft();
+    return;
+  }
+  if (
+    event.key === "Backspace" &&
+    !exportExcludeDraft.value &&
+    exportExcludeValues.value.length
+  ) {
+    removeExportExcludeValue(
+      exportExcludeValues.value[exportExcludeValues.value.length - 1],
+    );
+  }
 };
 
 const normalizeFecha = (value) => {
@@ -1546,26 +2743,131 @@ const multipageDocuments = computed(() =>
   sourceDocuments.value.filter((d) => d.pages > 1),
 );
 
+const activeFiles = computed(() =>
+  files.value.filter((f) => !f.reviewLater),
+);
+const reviewLaterFiles = computed(() =>
+  files.value.filter((f) => f.reviewLater),
+);
+const baseExportableFilesCount = computed(
+  () => files.value.filter((f) => f.status === "done" && !f.reviewLater).length,
+);
+const exportableFilesCount = computed(() => getExportableFiles().length);
+
+const matchesSearch = (f, q) => {
+  if (!q) return true;
+  const d = f.editableData;
+  return [
+    d.filename,
+    d.nombre,
+    d.documento,
+    d.ncf,
+    d.ncf_afectado,
+    d.tipo_de_suplidor,
+    d.tipo_de_gasto,
+    d.descripcion,
+    d.moneda,
+    d.metodo_de_pago,
+  ]
+    .filter(Boolean)
+    .some((v) => String(v).toLowerCase().includes(q));
+};
+
 const filteredFiles = computed(() => {
   const q = search.value.trim().toLowerCase();
-  if (!q) return files.value;
-  return files.value.filter((f) => {
-    const d = f.editableData;
-    return [
-      d.filename,
-      d.nombre,
-      d.documento,
-      d.ncf,
-      d.ncf_afectado,
-      d.tipo_de_suplidor,
-      d.tipo_de_gasto,
-      d.descripcion,
-      d.moneda,
-      d.metodo_de_pago,
-    ]
-      .filter(Boolean)
-      .some((v) => String(v).toLowerCase().includes(q));
+  const pool =
+    tableView.value === "review_later"
+      ? reviewLaterFiles.value
+      : activeFiles.value;
+  return pool.filter((f) => matchesSearch(f, q));
+});
+
+const selectedCount = computed(() => selectedFileIds.value.size);
+
+const allVisibleSelected = computed(() => {
+  const visible = filteredFiles.value;
+  return (
+    visible.length > 0 && visible.every((f) => selectedFileIds.value.has(f.id))
+  );
+});
+
+const someVisibleSelected = computed(() =>
+  filteredFiles.value.some((f) => selectedFileIds.value.has(f.id)),
+);
+
+const isSelected = (id) => selectedFileIds.value.has(id);
+
+const clearSelection = () => {
+  selectedFileIds.value = new Set();
+};
+
+const toggleSelect = (id) => {
+  const next = new Set(selectedFileIds.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  selectedFileIds.value = next;
+};
+
+/** Select/deselect a row on click; ignore edits and action controls. */
+const onRowClick = (event, id) => {
+  const target = event.target;
+  if (
+    !(target instanceof Element) ||
+    target.closest("input, select, textarea, button, a, label")
+  ) {
+    return;
+  }
+  toggleSelect(id);
+};
+
+const toggleSelectAllVisible = () => {
+  const visible = filteredFiles.value;
+  const next = new Set(selectedFileIds.value);
+  if (allVisibleSelected.value) {
+    visible.forEach((f) => next.delete(f.id));
+  } else {
+    visible.forEach((f) => next.add(f.id));
+  }
+  selectedFileIds.value = next;
+};
+
+const deferFileForLater = (file) => {
+  file.reviewLater = true;
+  const next = new Set(selectedFileIds.value);
+  next.delete(file.id);
+  selectedFileIds.value = next;
+};
+
+const restoreFileFromLater = (file) => {
+  file.reviewLater = false;
+  const next = new Set(selectedFileIds.value);
+  next.delete(file.id);
+  selectedFileIds.value = next;
+};
+
+const deferSelectedForLater = () => {
+  const ids = selectedFileIds.value;
+  files.value.forEach((f) => {
+    if (ids.has(f.id)) f.reviewLater = true;
   });
+  clearSelection();
+  if (reviewLaterFiles.value.length) {
+    tableView.value = "review_later";
+  }
+};
+
+const restoreSelectedFromLater = () => {
+  const ids = selectedFileIds.value;
+  files.value.forEach((f) => {
+    if (ids.has(f.id)) f.reviewLater = false;
+  });
+  clearSelection();
+  tableView.value = "active";
+};
+
+// Clear selection when switching tabs so bulk actions stay scoped.
+watch(tableView, () => {
+  clearSelection();
 });
 
 const formatBytes = (bytes) => {
@@ -1581,6 +2883,9 @@ const formatBytes = (bytes) => {
 
 onMounted(() => {
   loadClients();
+  restoreClientSelection();
+  loadStripNcfSettings();
+  loadExportValueFilterSettings();
   individualLimit.refresh();
   batchLimit.refresh();
   rateLimitTimer = setInterval(() => {
@@ -1590,6 +2895,7 @@ onMounted(() => {
   if (typeof window !== "undefined") {
     window.addEventListener("storage", onRateLimitStorage);
     window.addEventListener("resize", onWindowResize);
+    window.addEventListener("beforeunload", onBeforeUnload);
     try {
       const stored = window.localStorage.getItem(PREVIEW_WIDTH_KEY);
       const parsed = stored ? parseInt(stored, 10) : NaN;
@@ -1610,10 +2916,48 @@ onBeforeUnmount(() => {
     window.removeEventListener("storage", onRateLimitStorage);
     window.removeEventListener("resize", onWindowResize);
     window.removeEventListener("mousemove", onPreviewResizeMove);
+    window.removeEventListener("beforeunload", onBeforeUnload);
   }
   closePreview();
   files.value.forEach(revokeFileObjectUrl);
 });
+
+// Warn when leaving after a scan (in-app navigation → modal; reload/close →
+// browser native dialog). Progress is session-only and is not persisted.
+const leaveConfirmOpen = ref(false);
+let resolveLeaveNavigation = null;
+
+const hasUnsavedScanProgress = computed(() =>
+  files.value.some((f) => f.status !== "pending"),
+);
+
+const onBeforeUnload = (event) => {
+  if (!hasUnsavedScanProgress.value) return;
+  event.preventDefault();
+  event.returnValue = "";
+};
+
+onBeforeRouteLeave(() => {
+  if (!hasUnsavedScanProgress.value) return true;
+  leaveConfirmOpen.value = true;
+  return new Promise((resolve) => {
+    resolveLeaveNavigation = resolve;
+  });
+});
+
+const confirmLeave = () => {
+  leaveConfirmOpen.value = false;
+  const resolve = resolveLeaveNavigation;
+  resolveLeaveNavigation = null;
+  resolve?.(true);
+};
+
+const cancelLeave = () => {
+  leaveConfirmOpen.value = false;
+  const resolve = resolveLeaveNavigation;
+  resolveLeaveNavigation = null;
+  resolve?.(false);
+};
 
 // Refresh immediately if another tab updates either shared counter.
 const onRateLimitStorage = (event) => {
@@ -1653,6 +2997,9 @@ const createFileItem = (file) => {
     // server round-trip (including right after PDF page-splitting).
     objectUrl: isPreviewable ? URL.createObjectURL(rawFile) : null,
     status: "pending",
+    // When true, the row lives under "Revisar más tarde" and is omitted
+    // from the Excel export (Citrus upload errors can be fixed later).
+    reviewLater: false,
     data: null,
     originalData: null,
     editableData: {
@@ -1855,6 +3202,11 @@ const removeFile = (file) => {
     }
     revokeFileObjectUrl(files.value[index]);
     files.value.splice(index, 1);
+    if (selectedFileIds.value.has(file.id)) {
+      const next = new Set(selectedFileIds.value);
+      next.delete(file.id);
+      selectedFileIds.value = next;
+    }
   }
 };
 
@@ -1867,8 +3219,8 @@ const applyExtractedData = (fileItem, data) => {
     filename: fileItem.name,
     nombre: data.nombre || "",
     documento: String(data.documento || "").replace(/\D/g, ""),
-    ncf: data.ncf || "",
-    ncf_afectado: data.ncf_afectado || "",
+    ncf: normalizeNcf(data.ncf || ""),
+    ncf_afectado: normalizeNcf(data.ncf_afectado || "").slice(0, 11),
     tipo_de_suplidor: data.tipo_de_suplidor || "",
     tipo_de_gasto: data.tipo_de_gasto || "",
     descripcion: data.descripcion || "",
@@ -1951,6 +3303,27 @@ const runSingleFileEvaluation = async (fileItem) => {
         JSON.stringify(tipoDePagoCatalogPayload.value),
       );
     }
+    formData.append("concepto_document_comment", conceptoDocumentComment.value);
+    formData.append(
+      "tipo_de_pago_document_comment",
+      tipoDePagoDocumentComment.value,
+    );
+    if (businessRulesPayload.value.length) {
+      formData.append(
+        "business_rules",
+        JSON.stringify(businessRulesPayload.value),
+      );
+    }
+    if (tipoDeGastoContextPayload.value.length) {
+      formData.append(
+        "tipo_de_gasto_context",
+        JSON.stringify(tipoDeGastoContextPayload.value),
+      );
+    }
+    formData.append(
+      "tipo_de_gasto_document_comment",
+      tipoDeGastoDocumentComment.value,
+    );
 
     const response = await fetch(`${API_BASE}/upload`, {
       method: "POST",
@@ -1968,6 +3341,12 @@ const runSingleFileEvaluation = async (fileItem) => {
 
     if (result.status === "success") {
       applyExtractedData(fileItem, result.data);
+    } else if (result.status === "duplicate") {
+      fileItem.status = "duplicate";
+      fileItem.duplicateMessage = result.message || "Posible recibo duplicado.";
+      if (result.data) {
+        fileItem.data = result.data;
+      }
     } else {
       console.error(
         `[Upload] "${fileItem.name}": API returned non-success status`,
@@ -2132,8 +3511,10 @@ const processAll = async () => {
   totalProcessingTime.value = 0;
   const overallStartTime = performance.now();
 
-  const pendingFiles = files.value.filter((f) => f.status === "pending");
-  const BATCH_SIZE = 15;
+  const pendingFiles = files.value.filter(
+    (f) => f.status === "pending" && !f.reviewLater,
+  );
+  const BATCH_SIZE = 25;
   let stoppedForCooldown = false;
 
   for (let i = 0; i < pendingFiles.length; i += BATCH_SIZE) {
@@ -2187,6 +3568,27 @@ const processAll = async () => {
           JSON.stringify(tipoDePagoCatalogPayload.value),
         );
       }
+      formData.append("concepto_document_comment", conceptoDocumentComment.value);
+      formData.append(
+        "tipo_de_pago_document_comment",
+        tipoDePagoDocumentComment.value,
+      );
+      if (businessRulesPayload.value.length) {
+        formData.append(
+          "business_rules",
+          JSON.stringify(businessRulesPayload.value),
+        );
+      }
+      if (tipoDeGastoContextPayload.value.length) {
+        formData.append(
+          "tipo_de_gasto_context",
+          JSON.stringify(tipoDeGastoContextPayload.value),
+        );
+      }
+      formData.append(
+        "tipo_de_gasto_document_comment",
+        tipoDeGastoDocumentComment.value,
+      );
 
       const response = await fetch(`${API_BASE}/upload-batch`, {
         method: "POST",
@@ -2224,6 +3626,14 @@ const processAll = async () => {
 
         if (fileResult.status === "duplicate") {
           fileItem.status = "duplicate";
+          fileItem.duplicateMessage =
+            fileResult.message || "Posible recibo duplicado.";
+          if (fileResult.data) {
+            fileItem.data = fileResult.data;
+          }
+          console.info(
+            `[Batch Upload] "${fileItem.name}": marked as duplicate - ${fileItem.duplicateMessage}`,
+          );
         } else if (fileResult.status === "success" && fileResult.data) {
           const data = fileResult.data;
           const hasAnyData =
@@ -2280,37 +3690,52 @@ const buildCargaMasivaFilename = () => {
     .replace(/^_|_$/g, "");
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
-  const stamp = [
-    pad(now.getDate()),
-    pad(now.getMonth() + 1),
-    now.getFullYear(),
-  ].join("_") + `_${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const stamp =
+    [pad(now.getDate()), pad(now.getMonth() + 1), now.getFullYear()].join("_") +
+    `_${pad(now.getHours())}:${pad(now.getMinutes())}`;
   return `${clientName || "cliente"}-carga_masiva_gastos-${stamp}.xls`;
 };
 
 const downloadExcel = async () => {
   try {
-    const filesData = files.value
-      .filter((f) => f.status === "done")
-      .map((f) => ({
-        filename: f.editableData.filename,
-        nombre: (f.editableData.nombre || "").slice(0, 255),
-        documento: String(f.editableData.documento || "").replace(/\D/g, ""),
-        ncf: f.editableData.ncf || "",
-        ncf_afectado: String(f.editableData.ncf_afectado || "").slice(0, 11),
-        tipo_de_suplidor: f.editableData.tipo_de_suplidor || "",
-        tipo_de_gasto: f.editableData.tipo_de_gasto || "",
-        descripcion: (f.editableData.descripcion || "").slice(0, 200),
-        fecha: normalizeFecha(f.editableData.fecha || ""),
-        monto_en_servicios: f.editableData.monto_en_servicios || "0",
-        monto_en_bienes: f.editableData.monto_en_bienes || "0",
-        itbis: f.editableData.itbis || "0",
-        selectivo: f.editableData.selectivo || "0",
-        moneda: f.editableData.moneda || "",
-        metodo_de_pago: f.editableData.metodo_de_pago || "",
-        concepto_id: f.editableData.concepto_id,
-        tipo_de_pago_id: f.editableData.tipo_de_pago_id,
-      }));
+    const filesData = getExportableFiles().map((f) => {
+      const d = f.editableData;
+      return {
+        filename: d.filename,
+        nombre: applyStripNcfForColumn("nombre", (d.nombre || "").slice(0, 255)),
+        documento: applyStripNcfForColumn(
+          "documento",
+          String(d.documento || "").replace(/\D/g, ""),
+        ),
+        ncf: applyStripNcfForColumn("ncf", d.ncf || ""),
+        ncf_afectado: applyStripNcfForColumn(
+          "ncf_afectado",
+          d.ncf_afectado || "",
+        ).slice(0, 11),
+        tipo_de_suplidor: d.tipo_de_suplidor || "",
+        tipo_de_gasto: d.tipo_de_gasto || "",
+        descripcion: applyStripNcfForColumn(
+          "descripcion",
+          (d.descripcion || "").slice(0, 200),
+        ),
+        fecha: normalizeFecha(d.fecha || ""),
+        monto_en_servicios: d.monto_en_servicios || "0",
+        monto_en_bienes: d.monto_en_bienes || "0",
+        itbis: d.itbis || "0",
+        selectivo: d.selectivo || "0",
+        moneda: d.moneda || "",
+        metodo_de_pago: d.metodo_de_pago || "",
+        concepto_id: d.concepto_id,
+        tipo_de_pago_id: d.tipo_de_pago_id,
+      };
+    });
+
+    if (!filesData.length) {
+      alert(
+        "No hay filas para exportar con los filtros actuales. Revisa los valores incluidos/excluidos o incluye filas de «Revisar más tarde».",
+      );
+      return;
+    }
 
     const response = await fetch(`${API_BASE}/download`, {
       method: "POST",
@@ -2341,6 +3766,8 @@ const clearFiles = () => {
   files.value = [];
   sourceDocuments.value = [];
   totalProcessingTime.value = 0;
+  clearSelection();
+  tableView.value = "active";
   if (fileInput.value) {
     fileInput.value.value = "";
   }

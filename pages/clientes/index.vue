@@ -2,6 +2,7 @@
 import type { Client } from "~/composables/useClients";
 
 const { list, create, remove } = useClients();
+const { create: createBusinessRule } = useClientBusinessRules();
 
 const clients = ref<Client[]>([]);
 const pending = ref(true);
@@ -15,6 +16,48 @@ const form = reactive({
   name: "",
   taxPayerId: "",
 });
+
+// --- Optional business rules at creation time ------------------------------
+let ruleRowSeq = 0;
+const nextRuleRowKey = () => `new-client-rule-${ruleRowSeq++}`;
+
+type NewRuleRow = {
+  key: string;
+  ruleType: string;
+  description: string;
+};
+
+const showBusinessRules = ref(false);
+const businessRuleName = ref("");
+const businessRuleRows = ref<NewRuleRow[]>([
+  { key: nextRuleRowKey(), ruleType: "", description: "" },
+]);
+
+function addBusinessRuleRow() {
+  businessRuleRows.value.push({
+    key: nextRuleRowKey(),
+    ruleType: "",
+    description: "",
+  });
+}
+
+function removeBusinessRuleRow(key: string) {
+  if (businessRuleRows.value.length <= 1) {
+    businessRuleRows.value = [
+      { key: nextRuleRowKey(), ruleType: "", description: "" },
+    ];
+    return;
+  }
+  businessRuleRows.value = businessRuleRows.value.filter((r) => r.key !== key);
+}
+
+function resetBusinessRulesForm() {
+  showBusinessRules.value = false;
+  businessRuleName.value = "";
+  businessRuleRows.value = [
+    { key: nextRuleRowKey(), ruleType: "", description: "" },
+  ];
+}
 
 async function load() {
   pending.value = true;
@@ -32,6 +75,7 @@ function openForm() {
   form.name = "";
   form.taxPayerId = "";
   formError.value = null;
+  resetBusinessRulesForm();
   showForm.value = true;
 }
 
@@ -49,6 +93,30 @@ async function onSubmit() {
       taxPayerId: form.taxPayerId,
     });
     clients.value = [created, ...clients.value];
+
+    const filledRows = businessRuleRows.value.filter(
+      (r) => r.ruleType.trim().length > 0
+    );
+    if (showBusinessRules.value && filledRows.length > 0) {
+      try {
+        await createBusinessRule(created.id, {
+          ruleName: businessRuleName.value.trim() || "Reglas generales",
+          attributes: filledRows.map((r) => ({
+            ruleType: r.ruleType,
+            ruleValue: "",
+            description: r.description,
+          })),
+        });
+      } catch (ruleErr: any) {
+        // The client was created successfully; surface the rules failure
+        // without blocking, since business rules are optional and can be
+        // added later from the client detail page.
+        error.value =
+          ruleErr?.message ||
+          "El cliente se creó, pero no se pudieron guardar las reglas de negocio.";
+      }
+    }
+
     showForm.value = false;
   } catch (err: any) {
     formError.value = err?.message || "No se pudo crear el cliente.";
@@ -283,6 +351,101 @@ onMounted(load);
               class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
               placeholder="Ej. 101234567"
             />
+          </div>
+
+          <div class="rounded-lg border border-gray-200 bg-gray-50/60 p-3.5">
+            <button
+              type="button"
+              class="flex w-full items-center justify-between gap-2 text-left"
+              @click="showBusinessRules = !showBusinessRules"
+            >
+              <span>
+                <span class="block text-sm font-medium text-gray-700">
+                  Reglas de negocio
+                  <span class="font-normal text-gray-400">(opcional)</span>
+                </span>
+                <span class="mt-0.5 block text-xs text-gray-400">
+                  Contexto para ayudar a la IA a clasificar documentos de
+                  este cliente. También puedes agregarlas después.
+                </span>
+              </span>
+              <svg
+                class="h-4 w-4 flex-shrink-0 text-gray-400 transition"
+                :class="showBusinessRules ? 'rotate-90' : ''"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 5l7 7-7 7"
+                />
+              </svg>
+            </button>
+
+            <div v-if="showBusinessRules" class="mt-3.5 space-y-3">
+              <div>
+                <label
+                  for="business-rule-name"
+                  class="mb-1.5 block text-xs font-medium text-gray-600"
+                >
+                  Nombre del grupo de reglas
+                </label>
+                <input
+                  id="business-rule-name"
+                  v-model="businessRuleName"
+                  type="text"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                  placeholder="Ej. Reglas generales"
+                />
+              </div>
+
+              <div
+                v-for="(row, index) in businessRuleRows"
+                :key="row.key"
+                class="rounded-lg border border-gray-200 bg-white p-3"
+              >
+                <div class="mb-2 flex items-center justify-between">
+                  <span
+                    class="text-xs font-medium uppercase tracking-wide text-gray-400"
+                  >
+                    Regla {{ index + 1 }}
+                  </span>
+                  <button
+                    type="button"
+                    class="rounded-md px-2 py-0.5 text-xs font-medium text-gray-400 transition hover:bg-red-50 hover:text-red-500"
+                    title="Quitar regla"
+                    @click="removeBusinessRuleRow(row.key)"
+                  >
+                    Quitar
+                  </button>
+                </div>
+                <div class="space-y-2">
+                  <input
+                    v-model="row.ruleType"
+                    type="text"
+                    class="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                    placeholder="Ej. Facturas sin NCF"
+                  />
+                  <textarea
+                    v-model="row.description"
+                    rows="2"
+                    class="w-full resize-y rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                    placeholder="Contexto para la IA (opcional)…"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="button"
+                class="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                @click="addBusinessRuleRow"
+              >
+                Agregar otra regla
+              </button>
+            </div>
           </div>
 
           <p

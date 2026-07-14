@@ -93,6 +93,10 @@ export type Database = {
           id: string;
           client_id: string;
           document_name: string;
+          // Free-text, document-level context (e.g. notes on how to
+          // classify this whole "Gastos" group) fed to the LLM alongside
+          // the per-attribute descriptions.
+          comment: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -100,9 +104,12 @@ export type Database = {
           id?: string;
           client_id: string;
           document_name: string;
+          comment?: string | null;
         };
         Update: {
           document_name?: string;
+          comment?: string | null;
+          updated_at?: string;
         };
       };
       document_attributes: {
@@ -124,6 +131,46 @@ export type Database = {
         Update: {
           document_type?: string;
           document_id?: number | null;
+          description?: string | null;
+        };
+      };
+      client_business_rules: {
+        Row: {
+          id: string;
+          client_id: string;
+          rule_name: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          client_id: string;
+          rule_name: string;
+        };
+        Update: {
+          rule_name?: string;
+          updated_at?: string;
+        };
+      };
+      business_rule_attributes: {
+        Row: {
+          id: number;
+          client_business_rule_id: string;
+          rule_type: string;
+          rule_value: string | null;
+          description: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          client_business_rule_id: string;
+          rule_type: string;
+          rule_value?: string | null;
+          description?: string | null;
+        };
+        Update: {
+          rule_type?: string;
+          rule_value?: string | null;
           description?: string | null;
         };
       };

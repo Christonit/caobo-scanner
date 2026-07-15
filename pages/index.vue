@@ -1250,7 +1250,7 @@
             </button>
             <button
               v-if="baseExportableFilesCount > 0"
-              @click="downloadExcel"
+              @click="openSuplidorSummary"
               class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               :disabled="exportableFilesCount === 0"
               :title="
@@ -1708,6 +1708,130 @@
       </div>
     </div>
   </div>
+
+  <!-- ── Suplidores summary modal (shown before Excel download) ─────────── -->
+  <div
+    v-if="showSuplidorSummary"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+    @click.self="showSuplidorSummary = false"
+  >
+    <div class="w-full max-w-lg rounded-xl bg-white shadow-xl">
+      <div class="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+        <div>
+          <h2 class="text-base font-semibold text-gray-900">
+            Resumen de Suplidores
+          </h2>
+          <p class="mt-0.5 text-sm text-gray-500">
+            <span class="font-medium text-gray-700">{{ suplidorSummaryRows.length }}</span>
+            {{ suplidorSummaryRows.length === 1 ? "suplidor único" : "suplidores únicos" }} en este archivo.
+            <span
+              v-if="suplidorSummaryRows.some(s => !s.registered_on_platform)"
+              class="text-amber-600"
+            >
+              {{ suplidorSummaryRows.filter(s => !s.registered_on_platform).length }} no registrados en la plataforma.
+            </span>
+          </p>
+        </div>
+        <button
+          type="button"
+          class="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          @click="showSuplidorSummary = false"
+        >
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="max-h-72 overflow-y-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="sticky top-0 border-b border-gray-100 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500">
+            <tr>
+              <th class="px-5 py-2.5">Documento</th>
+              <th class="px-5 py-2.5">Nombre</th>
+              <th class="px-5 py-2.5">Estado</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr
+              v-for="s in suplidorSummaryRows"
+              :key="s.documento || s.nombre"
+              class="hover:bg-gray-50"
+            >
+              <td class="px-5 py-2.5 font-mono text-xs text-gray-600">
+                {{ s.documento || "—" }}
+              </td>
+              <td class="px-5 py-2.5 text-gray-900">{{ s.nombre }}</td>
+              <td class="px-5 py-2.5">
+                <span
+                  class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold"
+                  :class="
+                    s.registered_on_platform
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-amber-50 text-amber-700'
+                  "
+                >
+                  <svg
+                    v-if="s.registered_on_platform"
+                    class="h-3 w-3"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                  </svg>
+                  <svg
+                    v-else
+                    class="h-3 w-3"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v4m0 4h.01" />
+                  </svg>
+                  {{ s.registered_on_platform ? "Registrado" : "No registrado" }}
+                </span>
+              </td>
+            </tr>
+            <tr v-if="suplidorSummaryRows.length === 0">
+              <td colspan="3" class="px-5 py-8 text-center text-sm text-gray-400">
+                No se detectaron suplidores en las filas exportables.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p
+        v-if="suplidorSaveError"
+        class="mx-6 mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+      >
+        {{ suplidorSaveError }}
+      </p>
+
+      <div class="flex items-center justify-between border-t border-gray-100 px-6 py-4">
+        <p class="text-xs text-gray-400">
+          Los suplidores nuevos se guardarán en la base de datos al descargar.
+        </p>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="rounded-lg px-3.5 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
+            @click="showSuplidorSummary = false"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+            :disabled="suplidorSaving"
+            @click="saveSuplidoresAndDownload"
+          >
+            {{ suplidorSaving ? "Guardando…" : "Descargar Excel" }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -1720,6 +1844,7 @@ const API_BASE = useApiBase();
 const { list: listClients } = useClients();
 const { listByClient } = useClientDocuments();
 const { listByClient: listBusinessRulesByClient } = useClientBusinessRules();
+const { upsertFromScan, listByClient: listSuplidoresByClient } = useClientSuplidores();
 
 const clients = ref([]);
 const clientsLoading = ref(false);
@@ -3679,6 +3804,85 @@ const processAll = async () => {
     );
   }
 };
+
+// --- Suplidores summary before download ----------------------------------
+// SuplidorSummaryRow shape: { nombre, documento, tipo_de_factura, registered_on_platform }
+
+const showSuplidorSummary = ref(false);
+const suplidorSummaryRows = ref([]);
+const suplidorSummaryTogglingId = ref(null);
+const suplidorSaveError = ref(null);
+const suplidorSaving = ref(false);
+
+async function buildSuplidorSummary() {
+  if (!selectedClientId.value) return [];
+  const exportable = getExportableFiles();
+  const uniqueMap = new Map();
+  for (const f of exportable) {
+    const d = f.editableData;
+    const doc = String(d.documento || "").replace(/\D/g, "").slice(0, 20);
+    const nombre = (d.nombre || "").trim();
+    if (!nombre) continue;
+    const key = doc || nombre;
+    if (!uniqueMap.has(key)) {
+      uniqueMap.set(key, {
+        nombre,
+        documento: doc,
+        tipo_de_factura: d.tipo_de_suplidor || "",
+      });
+    }
+  }
+  if (!uniqueMap.size) return [];
+
+  // Load existing suplidores to check registered status
+  let existing = [];
+  try {
+    existing = await listSuplidoresByClient(selectedClientId.value);
+  } catch (_) {
+    // non-blocking — summary still shown without registered status
+  }
+  const registeredDocs = new Set(
+    existing.filter((s) => s.registered_on_platform).map((s) => s.documento ?? "")
+  );
+  const registeredNames = new Set(
+    existing.filter((s) => s.registered_on_platform && !s.documento).map((s) => s.nombre)
+  );
+
+  return [...uniqueMap.values()].map((s) => ({
+    ...s,
+    registered_on_platform:
+      (s.documento && registeredDocs.has(s.documento)) ||
+      (!s.documento && registeredNames.has(s.nombre)),
+  }));
+}
+
+async function openSuplidorSummary() {
+  suplidorSummaryRows.value = await buildSuplidorSummary();
+  showSuplidorSummary.value = true;
+}
+
+async function saveSuplidoresAndDownload() {
+  if (selectedClientId.value && suplidorSummaryRows.value.length > 0) {
+    suplidorSaving.value = true;
+    suplidorSaveError.value = null;
+    try {
+      await upsertFromScan(
+        selectedClientId.value,
+        suplidorSummaryRows.value.map((s) => ({
+          nombre: s.nombre,
+          documento: s.documento || null,
+          tipo_de_factura: s.tipo_de_factura || null,
+        })),
+      );
+    } catch (e) {
+      suplidorSaveError.value = e?.message || "Error guardando suplidores.";
+    } finally {
+      suplidorSaving.value = false;
+    }
+  }
+  showSuplidorSummary.value = false;
+  await downloadExcel();
+}
 
 const buildCargaMasivaFilename = () => {
   const client = clients.value.find((c) => c.id === selectedClientId.value);

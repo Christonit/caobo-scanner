@@ -31,13 +31,24 @@ async function signOut() {
 
 const nav = [
   { to: "/resumen", label: "Resumen", icon: "home" },
-  { to: "/", label: "Extraer", icon: "extract" },
+  {
+    to: "/",
+    label: "Extraer",
+    icon: "extract",
+    children: [
+      { to: "/", label: "Gastos" },
+      { to: "/suplidores", label: "Suplidores" },
+    ],
+  },
   { to: "/documentos", label: "Documentos", icon: "doc" },
   { to: "/clientes", label: "Clientes", icon: "users" },
   { to: "/plantillas", label: "Plantillas", icon: "template" },
 ];
 
-function isNavActive(to: string) {
+function isNavActive(to: string, children?: { to: string }[]) {
+  if (children?.length) {
+    return children.some((c) => isNavActive(c.to));
+  }
   if (to === "/") return route.path === "/";
   return route.path === to || route.path.startsWith(`${to}/`);
 }
@@ -100,13 +111,16 @@ const userInitials = computed(() =>
 
           <!-- Nav -->
           <nav class="flex-1 space-y-0.5 px-3">
-            <NuxtLink
+            <div
               v-for="item in nav"
               :key="item.to"
+              :class="item.children ? 'group/flyout relative' : ''"
+            >
+            <NuxtLink
               :to="item.to"
               class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition"
               :class="
-                isNavActive(item.to)
+                isNavActive(item.to, item.children)
                   ? 'bg-emerald-50 text-emerald-700'
                   : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
               "
@@ -114,7 +128,7 @@ const userInitials = computed(() =>
               <span
                 class="flex h-5 w-5 items-center justify-center"
                 :class="
-                  isNavActive(item.to)
+                  isNavActive(item.to, item.children)
                     ? 'text-emerald-600'
                     : 'text-gray-400 group-hover:text-gray-600'
                 "
@@ -196,7 +210,42 @@ const userInitials = computed(() =>
                 </svg>
               </span>
               {{ item.label }}
+              <!-- Chevron indicator for items with children -->
+              <svg
+                v-if="item.children"
+                class="ml-auto h-3.5 w-3.5 text-gray-400 transition group-hover/flyout:rotate-180"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
             </NuxtLink>
+
+            <!-- Flyout submenu (hover-based, CSS only) -->
+            <div
+              v-if="item.children"
+              class="absolute left-0 top-full z-50 hidden w-full flex-col overflow-hidden rounded-b-lg border border-t-0 border-gray-200 bg-white shadow-md group-hover/flyout:flex"
+            >
+              <NuxtLink
+                v-for="child in item.children"
+                :key="child.to"
+                :to="child.to"
+                class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition"
+                :class="
+                  isNavActive(child.to)
+                    ? 'bg-emerald-50 text-emerald-700'
+                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                "
+              >
+                <span
+                  class="h-1.5 w-1.5 rounded-full"
+                  :class="isNavActive(child.to) ? 'bg-emerald-500' : 'bg-gray-300'"
+                />
+                {{ child.label }}
+              </NuxtLink>
+            </div>
+            </div>
           </nav>
 
           <!-- Settings + logged-in user + sign out -->

@@ -174,6 +174,33 @@ export type Database = {
           description?: string | null;
         };
       };
+      client_suplidores: {
+        Row: {
+          id: string;
+          client_id: string;
+          nombre: string;
+          documento: string | null;
+          tipo_de_factura: string | null;
+          registered_on_platform: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          client_id: string;
+          nombre: string;
+          documento?: string | null;
+          tipo_de_factura?: string | null;
+          registered_on_platform?: boolean;
+        };
+        Update: {
+          nombre?: string;
+          documento?: string | null;
+          tipo_de_factura?: string | null;
+          registered_on_platform?: boolean;
+          updated_at?: string;
+        };
+      };
       templates: {
         Row: {
           id: string;

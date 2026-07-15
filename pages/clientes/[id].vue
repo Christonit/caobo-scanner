@@ -10,6 +10,8 @@ import type {
   ClientBusinessRuleWithAttributes,
   BusinessRuleAttribute,
 } from "~/composables/useClientBusinessRules";
+import type { ClientSuplidor, ClientSuplidorInput } from "~/composables/useClientSuplidores";
+import { TIPO_DE_FACTURA_OPTIONS } from "~/composables/useClientSuplidores";
 
 const route = useRoute();
 const clientId = computed(() => route.params.id as string);
@@ -24,8 +26,15 @@ const {
   updateAttributeDescription: updateRuleAttributeDescription,
   remove: removeRule,
 } = useClientBusinessRules();
+const {
+  listByClient: listSuplidoresByClient,
+  create: createSuplidor,
+  update: updateSuplidor,
+  markAsRegistered,
+  remove: removeSuplidor,
+} = useClientSuplidores();
 
-type Tab = "documentos" | "reglas";
+type Tab = "documentos" | "reglas" | "suplidores";
 const activeTab = ref<Tab>("documentos");
 
 const client = ref<Client | null>(null);
@@ -68,6 +77,28 @@ const ruleExpandedIds = ref<Set<string>>(new Set());
 
 const isEditingRule = computed(() => editingRule.value != null);
 
+// --- Suplidores state ---------------------------------------------------
+const suplidores = ref<ClientSuplidor[]>([]);
+const showSuplidorForm = ref(false);
+const editingSuplidor = ref<ClientSuplidor | null>(null);
+const suplidorSubmitting = ref(false);
+const suplidorFormError = ref<string | null>(null);
+const deletingSuplidorId = ref<string | null>(null);
+const togglingRegisteredId = ref<string | null>(null);
+
+const isEditingSuplidor = computed(() => editingSuplidor.value != null);
+
+const suplidorDraft = ref<ClientSuplidorInput>({
+  nombre: "",
+  documento: null,
+  tipo_de_factura: null,
+  registered_on_platform: false,
+});
+
+const registeredCount = computed(
+  () => suplidores.value.filter((s) => s.registered_on_platform).length
+);
+
 async function load() {
   pending.value = true;
   error.value = null;
@@ -85,6 +116,7 @@ async function load() {
     expandedIds.value = new Set(documents.value.map((d) => d.id));
     businessRules.value = await listRulesByClient(clientId.value);
     ruleExpandedIds.value = new Set(businessRules.value.map((r) => r.id));
+    suplidores.value = await listSuplidoresByClient(clientId.value);
   } catch (err: any) {
     error.value = err?.message || "No se pudo cargar el cliente.";
   } finally {
@@ -357,6 +389,81 @@ function isRuleExpanded(id: string) {
   return ruleExpandedIds.value.has(id);
 }
 
+// --- Suplidores functions -----------------------------------------------
+function openSuplidorForm() {
+  suplidorFormError.value = null;
+  editingSuplidor.value = null;
+  suplidorDraft.value = { nombre: "", documento: null, tipo_de_factura: null, registered_on_platform: false };
+  showSuplidorForm.value = true;
+}
+
+function openSuplidorEdit(s: ClientSuplidor) {
+  suplidorFormError.value = null;
+  editingSuplidor.value = s;
+  suplidorDraft.value = {
+    nombre: s.nombre,
+    documento: s.documento,
+    tipo_de_factura: s.tipo_de_factura,
+    registered_on_platform: s.registered_on_platform,
+  };
+  showSuplidorForm.value = true;
+}
+
+function closeSuplidorForm() {
+  if (suplidorSubmitting.value) return;
+  showSuplidorForm.value = false;
+  editingSuplidor.value = null;
+}
+
+async function onSubmitSuplidor() {
+  suplidorSubmitting.value = true;
+  suplidorFormError.value = null;
+  try {
+    if (isEditingSuplidor.value && editingSuplidor.value) {
+      const updated = await updateSuplidor(editingSuplidor.value.id, suplidorDraft.value);
+      suplidores.value = suplidores.value.map((s) =>
+        s.id === updated.id ? updated : s
+      );
+    } else {
+      const created = await createSuplidor(clientId.value, suplidorDraft.value);
+      suplidores.value = [created, ...suplidores.value];
+    }
+    showSuplidorForm.value = false;
+    editingSuplidor.value = null;
+  } catch (err: any) {
+    suplidorFormError.value = err?.message || "No se pudo guardar el suplidor.";
+  } finally {
+    suplidorSubmitting.value = false;
+  }
+}
+
+async function onDeleteSuplidor(s: ClientSuplidor) {
+  if (!window.confirm(`¿Eliminar al suplidor "${s.nombre}"?`)) return;
+  deletingSuplidorId.value = s.id;
+  try {
+    await removeSuplidor(s.id);
+    suplidores.value = suplidores.value.filter((x) => x.id !== s.id);
+  } catch (err: any) {
+    suplidorFormError.value = err?.message || "No se pudo eliminar el suplidor.";
+  } finally {
+    deletingSuplidorId.value = null;
+  }
+}
+
+async function onToggleRegistered(s: ClientSuplidor) {
+  togglingRegisteredId.value = s.id;
+  try {
+    const updated = await markAsRegistered(s.id, !s.registered_on_platform);
+    suplidores.value = suplidores.value.map((x) =>
+      x.id === updated.id ? updated : x
+    );
+  } catch (err: any) {
+    suplidorFormError.value = err?.message || "No se pudo actualizar el estado.";
+  } finally {
+    togglingRegisteredId.value = null;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -408,12 +515,20 @@ onMounted(load);
             Nuevo documento
           </button>
           <button
-            v-else
+            v-else-if="activeTab === 'reglas'"
             type="button"
             class="flex-shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
             @click="openRuleForm"
           >
             Nueva regla
+          </button>
+          <button
+            v-else
+            type="button"
+            class="flex-shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+            @click="openSuplidorForm"
+          >
+            Nuevo suplidor
           </button>
         </div>
       </header>
@@ -499,6 +614,26 @@ onMounted(load);
               v-if="activeTab === 'reglas'"
               class="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-emerald-600"
             />
+          </button>
+          <button
+            type="button"
+            class="relative ml-5 px-1 pb-3 text-sm font-semibold transition"
+            :class="
+              activeTab === 'suplidores'
+                ? 'text-gray-900'
+                : 'text-gray-400 hover:text-gray-600'
+            "
+            @click="activeTab = 'suplidores'"
+          >
+            Suplidores
+            <span
+              v-if="activeTab === 'suplidores'"
+              class="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-emerald-600"
+            />
+            <span
+              v-if="suplidores.length > 0"
+              class="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600"
+            >{{ suplidores.length }}</span>
           </button>
         </div>
 
@@ -736,7 +871,7 @@ onMounted(load);
           </div>
         </section>
 
-        <section v-else>
+        <section v-else-if="activeTab === 'reglas'">
           <div class="mb-4 flex items-baseline justify-between gap-3">
             <div>
               <h2
@@ -968,7 +1103,209 @@ onMounted(load);
             </article>
           </div>
         </section>
+
+        <!-- ===== Suplidores tab ===== -->
+        <section v-else-if="activeTab === 'suplidores'">
+          <div class="mb-4 flex items-baseline justify-between gap-3">
+            <div>
+              <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-400">
+                Suplidores
+              </h2>
+              <p class="mt-0.5 text-sm text-gray-500">
+                Proveedores registrados para este cliente.
+                <span v-if="suplidores.length > 0" class="ml-1">
+                  {{ registeredCount }} de {{ suplidores.length }} registrados en la plataforma.
+                </span>
+              </p>
+            </div>
+            <span class="text-sm text-gray-400">
+              {{ suplidores.length }} {{ suplidores.length === 1 ? "suplidor" : "suplidores" }}
+            </span>
+          </div>
+
+          <!-- Empty suplidores -->
+          <div
+            v-if="suplidores.length === 0"
+            class="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center"
+          >
+            <div class="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-gray-400">
+              <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"
+                  d="M17 20h5v-1a4 4 0 00-4-4h-1m-7 5H2v-1a4 4 0 014-4h4a4 4 0 014 4v1zm-3-9a3 3 0 11-6 0 3 3 0 016 0zm9-3a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <p class="text-sm font-medium text-gray-700">Sin suplidores todavía</p>
+            <p class="mt-1 max-w-sm text-sm text-gray-400">
+              Agrega suplidores manualmente o extráelos escaneando recibos en la
+              <NuxtLink to="/suplidores" class="text-emerald-600 hover:underline">página de Suplidores</NuxtLink>.
+            </p>
+            <button
+              type="button"
+              class="mt-5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+              @click="openSuplidorForm"
+            >
+              Nuevo suplidor
+            </button>
+          </div>
+
+          <!-- Suplidores table -->
+          <div v-else class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+            <table class="w-full text-left text-sm">
+              <thead class="border-b border-gray-100 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500">
+                <tr>
+                  <th class="px-5 py-3">Documento</th>
+                  <th class="px-5 py-3">Nombre</th>
+                  <th class="px-5 py-3">Tipo de Factura</th>
+                  <th class="px-5 py-3">Estado</th>
+                  <th class="w-28 px-4 py-3"><span class="sr-only">Acciones</span></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                <tr
+                  v-for="s in suplidores"
+                  :key="s.id"
+                  class="group hover:bg-gray-50"
+                >
+                  <td class="px-5 py-3 font-mono text-xs text-gray-600">
+                    {{ s.documento || "—" }}
+                  </td>
+                  <td class="px-5 py-3 font-medium text-gray-900">{{ s.nombre }}</td>
+                  <td class="px-5 py-3 text-gray-600">{{ s.tipo_de_factura || "—" }}</td>
+                  <td class="px-5 py-3">
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold transition"
+                      :class="
+                        s.registered_on_platform
+                          ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                          : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                      "
+                      :disabled="togglingRegisteredId === s.id"
+                      :title="s.registered_on_platform ? 'Marcar como no registrado' : 'Marcar como registrado'"
+                      @click="onToggleRegistered(s)"
+                    >
+                      <svg v-if="s.registered_on_platform" class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                      </svg>
+                      <svg v-else class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v4m0 4h.01" />
+                      </svg>
+                      {{ s.registered_on_platform ? "Registrado" : "No registrado" }}
+                    </button>
+                  </td>
+                  <td class="px-4 py-3 text-right">
+                    <div class="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
+                      <button
+                        type="button"
+                        class="rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+                        title="Editar"
+                        @click="openSuplidorEdit(s)"
+                      >
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-md p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
+                        title="Eliminar"
+                        :disabled="deletingSuplidorId === s.id"
+                        @click="onDeleteSuplidor(s)"
+                      >
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p v-if="suplidorFormError && activeTab === 'suplidores'" class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {{ suplidorFormError }}
+          </p>
+        </section>
       </template>
+    </div>
+
+    <!-- Suplidor create / edit modal -->
+    <div
+      v-if="showSuplidorForm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+      @click.self="closeSuplidorForm"
+    >
+      <div class="w-full max-w-md rounded-xl bg-white shadow-xl">
+        <div class="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <h2 class="text-base font-semibold text-gray-900">
+            {{ isEditingSuplidor ? "Editar suplidor" : "Nuevo suplidor" }}
+          </h2>
+          <button type="button" class="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600" @click="closeSuplidorForm">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <form class="px-6 py-5 space-y-4" @submit.prevent="onSubmitSuplidor">
+          <div>
+            <label class="mb-1.5 block text-sm font-medium text-gray-700">Nombre <span class="text-red-500">*</span></label>
+            <input
+              v-model="suplidorDraft.nombre"
+              type="text"
+              maxlength="255"
+              required
+              placeholder="Razón social del suplidor"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+            />
+          </div>
+          <div>
+            <label class="mb-1.5 block text-sm font-medium text-gray-700">Documento (RNC / Cédula / Pasaporte)</label>
+            <input
+              v-model="suplidorDraft.documento"
+              type="text"
+              maxlength="20"
+              inputmode="numeric"
+              placeholder="Solo dígitos, máx. 20 caracteres"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+              @input="suplidorDraft.documento = (suplidorDraft.documento || '').replace(/\D/g, '').slice(0, 20) || null"
+            />
+            <p class="mt-1 text-xs text-gray-400">Solo números, sin guiones ni espacios.</p>
+          </div>
+          <div>
+            <label class="mb-1.5 block text-sm font-medium text-gray-700">Tipo de Factura</label>
+            <select
+              v-model="suplidorDraft.tipo_de_factura"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+            >
+              <option :value="null">— Seleccionar —</option>
+              <option v-for="opt in TIPO_DE_FACTURA_OPTIONS" :key="opt" :value="opt">{{ opt }}</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <input
+              id="registered"
+              v-model="suplidorDraft.registered_on_platform"
+              type="checkbox"
+              class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            <label for="registered" class="text-sm text-gray-700">Registrado en la plataforma</label>
+          </div>
+
+          <p v-if="suplidorFormError" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {{ suplidorFormError }}
+          </p>
+
+          <div class="flex items-center justify-end gap-2 border-t border-gray-100 pt-4">
+            <button type="button" class="rounded-lg px-3.5 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100" :disabled="suplidorSubmitting" @click="closeSuplidorForm">
+              Cancelar
+            </button>
+            <button type="submit" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60" :disabled="suplidorSubmitting">
+              {{ suplidorSubmitting ? "Guardando…" : (isEditingSuplidor ? "Guardar cambios" : "Crear suplidor") }}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
 
     <!-- Create / edit document modal -->

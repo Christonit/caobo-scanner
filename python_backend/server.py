@@ -146,8 +146,42 @@ gemini_semaphore = asyncio.Semaphore(GEMINI_MAX_CONCURRENT)
 #   which handles many images per generate_content call well. NOTE: it is
 #   capped at 5 RPM on the free tier, so the frontend tracks batch requests
 #   in its own localStorage bucket and disables the button after 5 calls/min.
-INDIVIDUAL_MODEL = "gemma-4-26b"
+INDIVIDUAL_MODEL = "gemma-4-26b-a4b-it"
+# INDIVIDUAL_MODEL = "gemini-3.1-flash-lite"
 BATCH_MODEL = "gemini-3.1-flash-lite"
+
+
+def list_available_gemini_models(*, generate_content_only: bool = True) -> list[dict]:
+    """
+    Fetch the models available to this Gemini API key via ModelService.ListModels.
+
+    Returns a list of dicts with name, display_name, description, and
+    supported_generation_methods. By default only includes models that support
+    generateContent (what this server uses for receipt scanning).
+    """
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is not configured")
+
+    models: list[dict] = []
+    for model in genai.list_models():
+        methods = list(model.supported_generation_methods or [])
+        if generate_content_only and "generateContent" not in methods:
+            continue
+        # API returns names like "models/gemini-2.0-flash"; expose both forms.
+        full_name = model.name or ""
+        short_name = full_name.split("/", 1)[-1] if full_name else ""
+        models.append({
+            "name": short_name,
+            "full_name": full_name,
+            "display_name": getattr(model, "display_name", None) or short_name,
+            "description": getattr(model, "description", None) or "",
+            "supported_generation_methods": methods,
+            "input_token_limit": getattr(model, "input_token_limit", None),
+            "output_token_limit": getattr(model, "output_token_limit", None),
+        })
+
+    models.sort(key=lambda m: m["name"])
+    return models
 
 
 def calculate_file_hash(file_content: bytes) -> str:
@@ -1585,6 +1619,42 @@ async def root():
     return {"status": "ok", "message": "Receipt Processing API is running"}
 
 
+@app.get("/models")
+async def get_models(generate_content_only: bool = True):
+    """
+    List Gemini models available to the configured API key.
+
+    Open in the browser: http://127.0.0.1:8000/models
+    Pass ?generate_content_only=false to include models that cannot run
+    generateContent (e.g. embedding-only models).
+    """
+    if not GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY is not configured on the server.",
+        )
+    try:
+        models = await asyncio.to_thread(
+            list_available_gemini_models,
+            generate_content_only=generate_content_only,
+        )
+    except Exception as e:
+        print(f"[ERROR] [/models] Failed to list Gemini models: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to list Gemini models: {e}",
+        )
+
+    return {
+        "count": len(models),
+        "configured": {
+            "individual": INDIVIDUAL_MODEL,
+            "batch": BATCH_MODEL,
+        },
+        "models": models,
+    }
+
+
 @app.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
@@ -2006,6 +2076,237 @@ async def download_excel_get():
         path=OUTPUT_XLS,
         filename="processed_receipts.xls",
         media_type="application/vnd.ms-excel",
+    )
+
+
+TIPO_DE_FACTURA_OPTIONS_SUPLIDOR = ["Formal", "Informal", "Internacional", "Pagos al exterior"]
+# Pages per Gemini call for the suplidor scanner.
+SUPLIDOR_BATCH_SIZE = 5
+# Max PDF pages to scan (large docs may have hundreds of invoices).
+SUPLIDOR_MAX_PAGES = 500
+
+SUPLIDORES_BATCH_PROMPT = """Eres un contador experto radicado en República Dominicana. \
+Analiza TODAS las imágenes de facturas/recibos adjuntas y extrae TODOS los SUPLIDORES \
+(proveedores que emiten los documentos) únicos que encuentres.
+
+Para cada suplidor extrae:
+- nombre: nombre o razón social (máx. 255 caracteres).
+- documento: SOLO DÍGITOS del RNC / Cédula / Pasaporte, sin guiones ni espacios \
+  (ej: "101-70217-6" → "101702176"). Máximo 20 caracteres. Si no aparece, devuelve "".
+- tipo_de_factura: EXACTAMENTE uno de: Formal, Informal, Internacional, Pagos al exterior.
+  Regla: RNC + NCF formal → "Formal"; sin NCF formal → "Informal"; \
+  suplidor extranjero → "Internacional" o "Pagos al exterior".
+
+Devuelve un JSON con la clave "suplidores" que contenga un array:
+{"suplidores": [{"nombre": "...", "documento": "...", "tipo_de_factura": "..."}, ...]}
+Si no encuentras ningún suplidor, devuelve {"suplidores": []}.
+No incluyas texto fuera del JSON.
+"""
+
+
+def _get_tipo_documento(documento: str) -> str:
+    """Classify a cleaned documento string as RNC, CEDULA, or PASAPORTE."""
+    d = (documento or "").strip()
+    if not d:
+        return ""
+    if len(d) == 9 and d.isdigit():
+        return "RNC"
+    if len(d) == 11 and d.isdigit():
+        return "CEDULA"
+    return "PASAPORTE"
+
+
+def _extract_suplidores_from_batch(images: list, batch_num: int) -> list[dict]:
+    """
+    Send a batch of PIL images to Gemini and return a list of raw suplidor
+    dicts {nombre, documento, tipo_de_factura}.  Returns [] on any failure.
+    """
+    import time
+
+    model = genai.GenerativeModel(INDIVIDUAL_MODEL)
+    parts = [SUPLIDORES_BATCH_PROMPT] + images
+
+    for attempt in range(3):
+        try:
+            response = model.generate_content(
+                parts,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    max_output_tokens=1024,
+                    temperature=0.1,
+                ),
+            )
+            raw = (response.text or "").strip()
+            if raw.startswith("```"):
+                raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw).rstrip("`").strip()
+            data = json.loads(raw)
+            rows = data.get("suplidores", [])
+            if not isinstance(rows, list):
+                rows = []
+            result = []
+            for row in rows:
+                nombre = str(row.get("nombre", "") or "").strip()[:255]
+                documento = re.sub(r"\D", "", str(row.get("documento", "") or ""))[:20]
+                tipo = str(row.get("tipo_de_factura", "") or "").strip()
+                if tipo not in TIPO_DE_FACTURA_OPTIONS_SUPLIDOR:
+                    tipo = ""
+                if nombre:
+                    result.append({"nombre": nombre, "documento": documento, "tipo_de_factura": tipo})
+            print(f"[DEBUG] [suplidor-batch-{batch_num}] found {len(result)} suplidores")
+            return result
+        except Exception as e:
+            print(f"[ERROR] [suplidor-batch-{batch_num}] attempt {attempt + 1}: {e}")
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+    return []
+
+
+def extract_suplidores_from_file(file_content: bytes, filename: str) -> dict:
+    """
+    Render all pages of a PDF (or a single image) and process them in batches
+    through Gemini to extract every unique suplidor in the document.
+
+    Returns:
+        {
+            "page_count": int,
+            "suplidores": [
+                {
+                    "nombre": str,
+                    "documento": str,       # digits only, max 20
+                    "tipo_de_documento": str,  # RNC | CEDULA | PASAPORTE | ""
+                    "tipo_de_factura": str,
+                },
+                ...
+            ]
+        }
+    """
+    if not GEMINI_API_KEY:
+        return {"page_count": 0, "suplidores": []}
+
+    ext = Path(filename).suffix.lower() if filename else ""
+    if ext == ".pdf":
+        all_images = render_pdf_to_images(file_content, max_pages=SUPLIDOR_MAX_PAGES)
+    else:
+        from PIL import Image
+        import io
+        try:
+            img = Image.open(io.BytesIO(file_content))
+            img.load()
+            all_images = [img]
+        except Exception as e:
+            print(f"[ERROR] [scan-suplidores] Could not open image {filename}: {e}")
+            return {"page_count": 0, "suplidores": []}
+
+    page_count = len(all_images)
+    print(f"[INFO] [scan-suplidores] '{filename}': {page_count} page(s) to process")
+
+    if not all_images:
+        return {"page_count": 0, "suplidores": []}
+
+    # Process in batches and collect all raw rows
+    all_rows: list[dict] = []
+    for i in range(0, len(all_images), SUPLIDOR_BATCH_SIZE):
+        batch = all_images[i: i + SUPLIDOR_BATCH_SIZE]
+        batch_num = i // SUPLIDOR_BATCH_SIZE + 1
+        rows = _extract_suplidores_from_batch(batch, batch_num)
+        all_rows.extend(rows)
+
+    # Deduplicate: prefer the first occurrence of each (documento OR nombre) key
+    seen_docs: set[str] = set()
+    seen_names: set[str] = set()
+    unique: list[dict] = []
+    for row in all_rows:
+        doc_key = row["documento"].lower() if row["documento"] else ""
+        name_key = row["nombre"].lower()
+        if doc_key:
+            if doc_key in seen_docs:
+                continue
+            seen_docs.add(doc_key)
+        else:
+            if name_key in seen_names:
+                continue
+            seen_names.add(name_key)
+
+        unique.append({
+            "nombre": row["nombre"],
+            "documento": row["documento"],
+            "tipo_de_documento": _get_tipo_documento(row["documento"]),
+            "tipo_de_factura": row["tipo_de_factura"],
+        })
+
+    print(
+        f"[INFO] [scan-suplidores] '{filename}': {len(unique)} unique suplidor(s) "
+        f"from {page_count} page(s)"
+    )
+    return {"page_count": page_count, "suplidores": unique}
+
+
+@app.post("/scan-suplidores")
+async def scan_suplidores(file: UploadFile = File(...)):
+    """
+    Extract all unique suplidores from a PDF (all pages, batched) or image.
+
+    Returns:
+        {
+            "page_count": int,
+            "suplidores": [
+                {"nombre", "documento", "tipo_de_documento", "tipo_de_factura"},
+                ...
+            ]
+        }
+    """
+    allowed_extensions = {".pdf", ".png", ".jpg", ".jpeg"}
+    ext = Path(file.filename).suffix.lower() if file.filename else ""
+    if ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type. Supported: PDF, PNG, JPG, JPEG.",
+        )
+
+    file_content = await file.read()
+    print(
+        f"[INFO] [/scan-suplidores] Received '{file.filename}' ({len(file_content)} bytes)"
+    )
+
+    async with gemini_semaphore:
+        result = await asyncio.to_thread(
+            extract_suplidores_from_file, file_content, file.filename
+        )
+
+    return result
+
+
+@app.post("/download-suplidores-template")
+async def download_suplidores_template(suplidores: list = Body(...)):
+    """
+    Generate and return an Excel (.xlsx) with the platform's suplidor upload
+    format: Documento | Nombre | Tipo de Factura.
+    """
+    import io
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Suplidores"
+
+    headers = ["Documento", "Nombre", "Tipo de Factura"]
+    ws.append(headers)
+
+    for s in suplidores:
+        ws.append([
+            s.get("documento", ""),
+            s.get("nombre", ""),
+            s.get("tipo_de_factura", ""),
+        ])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=suplidores.xlsx"},
     )
 
 

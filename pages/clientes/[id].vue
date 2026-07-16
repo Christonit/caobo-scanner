@@ -10,7 +10,10 @@ import type {
   ClientBusinessRuleWithAttributes,
   BusinessRuleAttribute,
 } from "~/composables/useClientBusinessRules";
-import type { ClientSuplidor, ClientSuplidorInput } from "~/composables/useClientSuplidores";
+import type {
+  ClientSuplidor,
+  ClientSuplidorInput,
+} from "~/composables/useClientSuplidores";
 import { TIPO_DE_FACTURA_OPTIONS } from "~/composables/useClientSuplidores";
 import type { TaxColumnMapping } from "~/composables/useClientTaxColumnMapping";
 import { TAX_COLUMN_FIELDS } from "~/composables/useClientTaxColumnMapping";
@@ -89,6 +92,8 @@ const suplidorSubmitting = ref(false);
 const suplidorFormError = ref<string | null>(null);
 const deletingSuplidorId = ref<string | null>(null);
 const togglingRegisteredId = ref<string | null>(null);
+const unregisterConfirmOpen = ref(false);
+const unregisterTarget = ref<ClientSuplidor | null>(null);
 
 const isEditingSuplidor = computed(() => editingSuplidor.value != null);
 
@@ -99,12 +104,27 @@ const suplidorDraft = ref<ClientSuplidorInput>({
   registered_on_platform: false,
 });
 
+const suplidorSearch = ref("");
+
+const filteredSuplidores = computed(() => {
+  const q = suplidorSearch.value.trim().toLowerCase();
+  if (!q) return suplidores.value;
+  return suplidores.value.filter((s) => {
+    const nombre = (s.nombre ?? "").toLowerCase();
+    const documento = (s.documento ?? "").toLowerCase();
+    return nombre.includes(q) || documento.includes(q);
+  });
+});
+
 const registeredCount = computed(
-  () => suplidores.value.filter((s) => s.registered_on_platform).length
+  () => suplidores.value.filter((s) => s.registered_on_platform).length,
 );
 
 // --- Tax column mapping (Impuestos) state --------------------------------
-const TAX_COLUMN_FIELD_LABELS: Record<(typeof TAX_COLUMN_FIELDS)[number], string> = {
+const TAX_COLUMN_FIELD_LABELS: Record<
+  (typeof TAX_COLUMN_FIELDS)[number],
+  string
+> = {
   itbis: "ITBIS",
   selectivo: "Selectivo",
   descuento: "Descuento",
@@ -120,13 +140,17 @@ async function saveTaxMapping() {
   taxMappingError.value = null;
   taxMappingSaved.value = false;
   try {
-    taxMapping.value = await upsertTaxColumnMapping(clientId.value, taxMapping.value);
+    taxMapping.value = await upsertTaxColumnMapping(
+      clientId.value,
+      taxMapping.value,
+    );
     taxMappingSaved.value = true;
     setTimeout(() => {
       taxMappingSaved.value = false;
     }, 2000);
   } catch (err: any) {
-    taxMappingError.value = err?.message || "No se pudo guardar la configuración.";
+    taxMappingError.value =
+      err?.message || "No se pudo guardar la configuración.";
   } finally {
     taxMappingSaving.value = false;
   }
@@ -199,7 +223,7 @@ async function onUpdate(input: ClientDocumentInput) {
   try {
     const updated = await update(editingDoc.value.id, input);
     documents.value = documents.value.map((d) =>
-      d.id === updated.id ? updated : d
+      d.id === updated.id ? updated : d,
     );
     showForm.value = false;
     editingDoc.value = null;
@@ -220,7 +244,7 @@ function onFormSubmit(input: ClientDocumentInput) {
 async function onDelete(doc: ClientDocumentWithAttributes) {
   if (
     !window.confirm(
-      `¿Eliminar el documento "${doc.document_name}" y todos sus atributos?`
+      `¿Eliminar el documento "${doc.document_name}" y todos sus atributos?`,
     )
   ) {
     return;
@@ -237,7 +261,10 @@ async function onDelete(doc: ClientDocumentWithAttributes) {
   }
 }
 
-function openComment(doc: ClientDocumentWithAttributes, attr: DocumentAttribute) {
+function openComment(
+  doc: ClientDocumentWithAttributes,
+  attr: DocumentAttribute,
+) {
   commentDocId.value = doc.id;
   commentAttr.value = attr;
   commentDraft.value = attr.description ?? "";
@@ -259,14 +286,14 @@ async function saveComment() {
   try {
     const updated = await updateAttributeDescription(
       commentAttr.value.id,
-      commentDraft.value
+      commentDraft.value,
     );
     documents.value = documents.value.map((doc) => {
       if (doc.id !== commentDocId.value) return doc;
       return {
         ...doc,
         document_attributes: doc.document_attributes.map((a) =>
-          a.id === updated.id ? updated : a
+          a.id === updated.id ? updated : a,
         ),
       };
     });
@@ -330,7 +357,7 @@ async function onUpdateRule(input: ClientBusinessRuleInput) {
   try {
     const updated = await updateRule(editingRule.value.id, input);
     businessRules.value = businessRules.value.map((r) =>
-      r.id === updated.id ? updated : r
+      r.id === updated.id ? updated : r,
     );
     showRuleForm.value = false;
     editingRule.value = null;
@@ -351,7 +378,7 @@ function onRuleFormSubmit(input: ClientBusinessRuleInput) {
 async function onDeleteRule(rule: ClientBusinessRuleWithAttributes) {
   if (
     !window.confirm(
-      `¿Eliminar la regla "${rule.rule_name}" y todos sus atributos?`
+      `¿Eliminar la regla "${rule.rule_name}" y todos sus atributos?`,
     )
   ) {
     return;
@@ -370,7 +397,7 @@ async function onDeleteRule(rule: ClientBusinessRuleWithAttributes) {
 
 function openRuleComment(
   rule: ClientBusinessRuleWithAttributes,
-  attr: BusinessRuleAttribute
+  attr: BusinessRuleAttribute,
 ) {
   ruleCommentRuleId.value = rule.id;
   ruleCommentAttr.value = attr;
@@ -393,14 +420,14 @@ async function saveRuleComment() {
   try {
     const updated = await updateRuleAttributeDescription(
       ruleCommentAttr.value.id,
-      ruleCommentDraft.value
+      ruleCommentDraft.value,
     );
     businessRules.value = businessRules.value.map((rule) => {
       if (rule.id !== ruleCommentRuleId.value) return rule;
       return {
         ...rule,
         business_rule_attributes: rule.business_rule_attributes.map((a) =>
-          a.id === updated.id ? updated : a
+          a.id === updated.id ? updated : a,
         ),
       };
     });
@@ -427,7 +454,12 @@ function isRuleExpanded(id: string) {
 function openSuplidorForm() {
   suplidorFormError.value = null;
   editingSuplidor.value = null;
-  suplidorDraft.value = { nombre: "", documento: null, tipo_de_factura: null, registered_on_platform: false };
+  suplidorDraft.value = {
+    nombre: "",
+    documento: null,
+    tipo_de_factura: null,
+    registered_on_platform: false,
+  };
   showSuplidorForm.value = true;
 }
 
@@ -454,9 +486,12 @@ async function onSubmitSuplidor() {
   suplidorFormError.value = null;
   try {
     if (isEditingSuplidor.value && editingSuplidor.value) {
-      const updated = await updateSuplidor(editingSuplidor.value.id, suplidorDraft.value);
+      const updated = await updateSuplidor(
+        editingSuplidor.value.id,
+        suplidorDraft.value,
+      );
       suplidores.value = suplidores.value.map((s) =>
-        s.id === updated.id ? updated : s
+        s.id === updated.id ? updated : s,
       );
     } else {
       const created = await createSuplidor(clientId.value, suplidorDraft.value);
@@ -478,21 +513,45 @@ async function onDeleteSuplidor(s: ClientSuplidor) {
     await removeSuplidor(s.id);
     suplidores.value = suplidores.value.filter((x) => x.id !== s.id);
   } catch (err: any) {
-    suplidorFormError.value = err?.message || "No se pudo eliminar el suplidor.";
+    suplidorFormError.value =
+      err?.message || "No se pudo eliminar el suplidor.";
   } finally {
     deletingSuplidorId.value = null;
   }
 }
 
 async function onToggleRegistered(s: ClientSuplidor) {
+  if (s.registered_on_platform) {
+    unregisterTarget.value = s;
+    unregisterConfirmOpen.value = true;
+    return;
+  }
+  await applyRegisteredToggle(s, true);
+}
+
+function cancelUnregister() {
+  unregisterConfirmOpen.value = false;
+  unregisterTarget.value = null;
+}
+
+async function confirmUnregister() {
+  const s = unregisterTarget.value;
+  unregisterConfirmOpen.value = false;
+  unregisterTarget.value = null;
+  if (!s) return;
+  await applyRegisteredToggle(s, false);
+}
+
+async function applyRegisteredToggle(s: ClientSuplidor, value: boolean) {
   togglingRegisteredId.value = s.id;
   try {
-    const updated = await markAsRegistered(s.id, !s.registered_on_platform);
+    const updated = await markAsRegistered(s.id, value);
     suplidores.value = suplidores.value.map((x) =>
-      x.id === updated.id ? updated : x
+      x.id === updated.id ? updated : x,
     );
   } catch (err: any) {
-    suplidorFormError.value = err?.message || "No se pudo actualizar el estado.";
+    suplidorFormError.value =
+      err?.message || "No se pudo actualizar el estado.";
   } finally {
     togglingRegisteredId.value = null;
   }
@@ -667,7 +726,8 @@ onMounted(load);
             <span
               v-if="suplidores.length > 0"
               class="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600"
-            >{{ suplidores.length }}</span>
+              >{{ suplidores.length }}</span
+            >
           </button>
           <button
             type="button"
@@ -870,9 +930,7 @@ onMounted(load);
                         <p
                           class="whitespace-pre-wrap break-words"
                           :class="
-                            attr.description
-                              ? 'text-gray-600'
-                              : 'text-gray-300'
+                            attr.description ? 'text-gray-600' : 'text-gray-300'
                           "
                         >
                           {{ attr.description || "—" }}
@@ -930,8 +988,8 @@ onMounted(load);
                 Anotaciones del Negocio
               </h2>
               <p class="mt-0.5 text-sm text-gray-500">
-                Reglas de negocio opcionales que dan contexto a la IA para
-                tomar mejores decisiones con este cliente.
+                Reglas de negocio opcionales que dan contexto a la IA para tomar
+                mejores decisiones con este cliente.
               </p>
             </div>
             <span class="text-sm text-gray-400">
@@ -966,9 +1024,9 @@ onMounted(load);
               Sin reglas de negocio todavía
             </p>
             <p class="mt-1 max-w-sm text-sm text-gray-400">
-              Son opcionales. Agrega contexto (ej. excepciones o
-              convenciones) para ayudar a la IA a clasificar mejor los
-              documentos de este cliente.
+              Son opcionales. Agrega contexto (ej. excepciones o convenciones)
+              para ayudar a la IA a clasificar mejor los documentos de este
+              cliente.
             </p>
             <button
               type="button"
@@ -1103,9 +1161,7 @@ onMounted(load);
                         <p
                           class="whitespace-pre-wrap break-words"
                           :class="
-                            attr.description
-                              ? 'text-gray-600'
-                              : 'text-gray-300'
+                            attr.description ? 'text-gray-600' : 'text-gray-300'
                           "
                         >
                           {{ attr.description || "—" }}
@@ -1158,18 +1214,32 @@ onMounted(load);
         <section v-else-if="activeTab === 'suplidores'">
           <div class="mb-4 flex items-baseline justify-between gap-3">
             <div>
-              <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-400">
+              <h2
+                class="text-sm font-semibold uppercase tracking-wide text-gray-400"
+              >
                 Suplidores
               </h2>
               <p class="mt-0.5 text-sm text-gray-500">
                 Proveedores registrados para este cliente.
                 <span v-if="suplidores.length > 0" class="ml-1">
-                  {{ registeredCount }} de {{ suplidores.length }} registrados en la plataforma.
+                  {{ registeredCount }} de {{ suplidores.length }} agregados en
+                  el sistema.
                 </span>
               </p>
             </div>
             <span class="text-sm text-gray-400">
-              {{ suplidores.length }} {{ suplidores.length === 1 ? "suplidor" : "suplidores" }}
+              {{
+                suplidorSearch.trim()
+                  ? `${filteredSuplidores.length} de ${suplidores.length}`
+                  : suplidores.length
+              }}
+              {{
+                (suplidorSearch.trim()
+                  ? filteredSuplidores.length
+                  : suplidores.length) === 1
+                  ? "suplidor"
+                  : "suplidores"
+              }}
             </span>
           </div>
 
@@ -1178,16 +1248,33 @@ onMounted(load);
             v-if="suplidores.length === 0"
             class="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center"
           >
-            <div class="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-gray-400">
-              <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"
-                  d="M17 20h5v-1a4 4 0 00-4-4h-1m-7 5H2v-1a4 4 0 014-4h4a4 4 0 014 4v1zm-3-9a3 3 0 11-6 0 3 3 0 016 0zm9-3a3 3 0 11-6 0 3 3 0 016 0z" />
+            <div
+              class="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-gray-400"
+            >
+              <svg
+                class="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.8"
+                  d="M17 20h5v-1a4 4 0 00-4-4h-1m-7 5H2v-1a4 4 0 014-4h4a4 4 0 014 4v1zm-3-9a3 3 0 11-6 0 3 3 0 016 0zm9-3a3 3 0 11-6 0 3 3 0 016 0z"
+                />
               </svg>
             </div>
-            <p class="text-sm font-medium text-gray-700">Sin suplidores todavía</p>
+            <p class="text-sm font-medium text-gray-700">
+              Sin suplidores todavía
+            </p>
             <p class="mt-1 max-w-sm text-sm text-gray-400">
               Agrega suplidores manualmente o extráelos escaneando recibos en la
-              <NuxtLink to="/suplidores" class="text-emerald-600 hover:underline">página de Suplidores</NuxtLink>.
+              <NuxtLink
+                to="/suplidores"
+                class="text-emerald-600 hover:underline"
+                >página de Suplidores</NuxtLink
+              >.
             </p>
             <button
               type="button"
@@ -1198,82 +1285,167 @@ onMounted(load);
             </button>
           </div>
 
-          <!-- Suplidores table -->
-          <div v-else class="overflow-hidden rounded-xl border border-gray-200 bg-white">
-            <table class="w-full text-left text-sm">
-              <thead class="border-b border-gray-100 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500">
-                <tr>
-                  <th class="px-5 py-3">Documento</th>
-                  <th class="px-5 py-3">Nombre</th>
-                  <th class="px-5 py-3">Tipo de Factura</th>
-                  <th class="px-5 py-3">Estado</th>
-                  <th class="w-28 px-4 py-3"><span class="sr-only">Acciones</span></th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100">
-                <tr
-                  v-for="s in suplidores"
-                  :key="s.id"
-                  class="group hover:bg-gray-50"
+          <template v-else>
+            <div class="mb-3">
+              <div class="relative">
+                <svg
+                  class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
                 >
-                  <td class="px-5 py-3 font-mono text-xs text-gray-600">
-                    {{ s.documento || "—" }}
-                  </td>
-                  <td class="px-5 py-3 font-medium text-gray-900">{{ s.nombre }}</td>
-                  <td class="px-5 py-3 text-gray-600">{{ s.tipo_de_factura || "—" }}</td>
-                  <td class="px-5 py-3">
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold transition"
-                      :class="
-                        s.registered_on_platform
-                          ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                          : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-                      "
-                      :disabled="togglingRegisteredId === s.id"
-                      :title="s.registered_on_platform ? 'Marcar como no registrado' : 'Marcar como registrado'"
-                      @click="onToggleRegistered(s)"
-                    >
-                      <svg v-if="s.registered_on_platform" class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-                      </svg>
-                      <svg v-else class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v4m0 4h.01" />
-                      </svg>
-                      {{ s.registered_on_platform ? "Registrado" : "No registrado" }}
-                    </button>
-                  </td>
-                  <td class="px-4 py-3 text-right">
-                    <div class="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
-                      <button
-                        type="button"
-                        class="rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
-                        title="Editar"
-                        @click="openSuplidorEdit(s)"
-                      >
-                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        class="rounded-md p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
-                        title="Eliminar"
-                        :disabled="deletingSuplidorId === s.id"
-                        @click="onDeleteSuplidor(s)"
-                      >
-                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"
+                  />
+                </svg>
+                <input
+                  v-model="suplidorSearch"
+                  type="search"
+                  placeholder="Buscar por documento o nombre…"
+                  class="w-full max-w-sm rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 placeholder-gray-400 outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40"
+                />
+              </div>
+            </div>
 
-          <p v-if="suplidorFormError && activeTab === 'suplidores'" class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div
+              v-if="filteredSuplidores.length === 0"
+              class="rounded-xl border border-dashed border-gray-200 bg-white px-6 py-10 text-center text-sm text-gray-400"
+            >
+              Ningún suplidor coincide con “{{ suplidorSearch.trim() }}”.
+            </div>
+
+            <!-- Suplidores table -->
+            <div
+              v-else
+              class="overflow-y-auto rounded-xl border border-gray-200 bg-white max-h-[70vh]"
+            >
+              <table class="w-full text-left text-sm">
+                <thead
+                  class="sticky top-0 border-b border-gray-100 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500"
+                >
+                  <tr>
+                    <th class="px-5 py-3">Documento</th>
+                    <th class="px-5 py-3">Nombre</th>
+                    <th class="px-5 py-3">Tipo de Factura</th>
+                    <th class="w-36 px-4 py-3 text-center">En sistema</th>
+                    <th class="w-24 px-4 py-3">
+                      <span class="sr-only">Acciones</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                  <tr
+                    v-for="s in filteredSuplidores"
+                    :key="s.id"
+                    class="group hover:bg-gray-50"
+                  >
+                    <td class="px-5 py-3 font-mono text-xs text-gray-600">
+                      {{ s.documento || "—" }}
+                    </td>
+                    <td class="px-5 py-3 font-medium text-gray-900">
+                      {{ s.nombre }}
+                    </td>
+                    <td class="px-5 py-3 text-gray-600">
+                      {{ s.tipo_de_factura || "—" }}
+                    </td>
+                    <td class="px-4 py-3 text-center">
+                      <button
+                        type="button"
+                        class="inline-flex h-5 w-5 items-center justify-center rounded-full transition disabled:opacity-50"
+                        :class="
+                          s.registered_on_platform
+                            ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                            : 'border border-gray-300 text-gray-300 hover:border-emerald-400 hover:text-emerald-500'
+                        "
+                        :disabled="togglingRegisteredId === s.id"
+                        :title="
+                          s.registered_on_platform
+                            ? 'Quitar de agregado en el sistema'
+                            : 'Marcar como agregado en el sistema'
+                        "
+                        :aria-label="
+                          s.registered_on_platform
+                            ? 'Agregado en el sistema'
+                            : 'Marcar como agregado en el sistema'
+                        "
+                        :aria-pressed="s.registered_on_platform"
+                        @click="onToggleRegistered(s)"
+                      >
+                        <svg
+                          class="h-4 w-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2.5"
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                      </button>
+                    </td>
+                    <td class="px-4 py-3 text-right">
+                      <div
+                        class="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100"
+                      >
+                        <button
+                          type="button"
+                          class="rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+                          title="Editar"
+                          @click="openSuplidorEdit(s)"
+                        >
+                          <svg
+                            class="h-4 w-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="1.8"
+                              d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                            />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          class="rounded-md p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
+                          title="Eliminar"
+                          :disabled="deletingSuplidorId === s.id"
+                          @click="onDeleteSuplidor(s)"
+                        >
+                          <svg
+                            class="h-4 w-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="1.8"
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
+
+          <p
+            v-if="suplidorFormError && activeTab === 'suplidores'"
+            class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          >
             {{ suplidorFormError }}
           </p>
         </section>
@@ -1281,14 +1453,15 @@ onMounted(load);
         <!-- ===== Impuestos tab ===== -->
         <section v-else-if="activeTab === 'impuestos'">
           <div class="mb-4">
-            <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-400">
+            <h2
+              class="text-sm font-semibold uppercase tracking-wide text-gray-400"
+            >
               Columnas de Impuesto
             </h2>
             <p class="mt-1 text-sm text-gray-500">
-              La plantilla de Carga Masiva tiene 5 columnas genéricas
-              (Impuesto 1 a 5). Define en cuál de ellas se debe escribir
-              cada monto para este cliente. Deja "No exportar" si un monto
-              no aplica.
+              La plantilla de Carga Masiva tiene 5 columnas genéricas (Impuesto
+              1 a 5). Define en cuál de ellas se debe escribir cada monto para
+              este cliente. Deja "No exportar" si un monto no aplica.
             </p>
           </div>
 
@@ -1312,11 +1485,16 @@ onMounted(load);
               </select>
             </div>
 
-            <p v-if="taxMappingError" class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <p
+              v-if="taxMappingError"
+              class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+            >
               {{ taxMappingError }}
             </p>
 
-            <div class="mt-5 flex items-center gap-3 border-t border-gray-100 pt-4">
+            <div
+              class="mt-5 flex items-center gap-3 border-t border-gray-100 pt-4"
+            >
               <button
                 type="button"
                 :disabled="taxMappingSaving"
@@ -1325,7 +1503,10 @@ onMounted(load);
               >
                 {{ taxMappingSaving ? "Guardando…" : "Guardar" }}
               </button>
-              <span v-if="taxMappingSaved" class="text-sm font-medium text-emerald-600">
+              <span
+                v-if="taxMappingSaved"
+                class="text-sm font-medium text-emerald-600"
+              >
                 Guardado
               </span>
             </div>
@@ -1341,19 +1522,37 @@ onMounted(load);
       @click.self="closeSuplidorForm"
     >
       <div class="w-full max-w-md rounded-xl bg-white shadow-xl">
-        <div class="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+        <div
+          class="flex items-center justify-between border-b border-gray-100 px-6 py-4"
+        >
           <h2 class="text-base font-semibold text-gray-900">
             {{ isEditingSuplidor ? "Editar suplidor" : "Nuevo suplidor" }}
           </h2>
-          <button type="button" class="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600" @click="closeSuplidorForm">
-            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          <button
+            type="button"
+            class="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            @click="closeSuplidorForm"
+          >
+            <svg
+              class="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
         <form class="px-6 py-5 space-y-4" @submit.prevent="onSubmitSuplidor">
           <div>
-            <label class="mb-1.5 block text-sm font-medium text-gray-700">Nombre <span class="text-red-500">*</span></label>
+            <label class="mb-1.5 block text-sm font-medium text-gray-700"
+              >Nombre <span class="text-red-500">*</span></label
+            >
             <input
               v-model="suplidorDraft.nombre"
               type="text"
@@ -1364,7 +1563,9 @@ onMounted(load);
             />
           </div>
           <div>
-            <label class="mb-1.5 block text-sm font-medium text-gray-700">Documento (RNC / Cédula / Pasaporte)</label>
+            <label class="mb-1.5 block text-sm font-medium text-gray-700"
+              >Documento (RNC / Cédula / Pasaporte)</label
+            >
             <input
               v-model="suplidorDraft.documento"
               type="text"
@@ -1372,18 +1573,33 @@ onMounted(load);
               inputmode="numeric"
               placeholder="Solo dígitos, máx. 20 caracteres"
               class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-              @input="suplidorDraft.documento = (suplidorDraft.documento || '').replace(/\D/g, '').slice(0, 20) || null"
+              @input="
+                suplidorDraft.documento =
+                  (suplidorDraft.documento || '')
+                    .replace(/\D/g, '')
+                    .slice(0, 20) || null
+              "
             />
-            <p class="mt-1 text-xs text-gray-400">Solo números, sin guiones ni espacios.</p>
+            <p class="mt-1 text-xs text-gray-400">
+              Solo números, sin guiones ni espacios.
+            </p>
           </div>
           <div>
-            <label class="mb-1.5 block text-sm font-medium text-gray-700">Tipo de Factura</label>
+            <label class="mb-1.5 block text-sm font-medium text-gray-700"
+              >Tipo de Factura</label
+            >
             <select
               v-model="suplidorDraft.tipo_de_factura"
               class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
             >
               <option :value="null">— Seleccionar —</option>
-              <option v-for="opt in TIPO_DE_FACTURA_OPTIONS" :key="opt" :value="opt">{{ opt }}</option>
+              <option
+                v-for="opt in TIPO_DE_FACTURA_OPTIONS"
+                :key="opt"
+                :value="opt"
+              >
+                {{ opt }}
+              </option>
             </select>
           </div>
           <div class="flex items-center gap-2">
@@ -1393,19 +1609,41 @@ onMounted(load);
               type="checkbox"
               class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
             />
-            <label for="registered" class="text-sm text-gray-700">Registrado en la plataforma</label>
+            <label for="registered" class="text-sm text-gray-700"
+              >Registrado en la plataforma</label
+            >
           </div>
 
-          <p v-if="suplidorFormError" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p
+            v-if="suplidorFormError"
+            class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          >
             {{ suplidorFormError }}
           </p>
 
-          <div class="flex items-center justify-end gap-2 border-t border-gray-100 pt-4">
-            <button type="button" class="rounded-lg px-3.5 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100" :disabled="suplidorSubmitting" @click="closeSuplidorForm">
+          <div
+            class="flex items-center justify-end gap-2 border-t border-gray-100 pt-4"
+          >
+            <button
+              type="button"
+              class="rounded-lg px-3.5 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
+              :disabled="suplidorSubmitting"
+              @click="closeSuplidorForm"
+            >
               Cancelar
             </button>
-            <button type="submit" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60" :disabled="suplidorSubmitting">
-              {{ suplidorSubmitting ? "Guardando…" : (isEditingSuplidor ? "Guardar cambios" : "Crear suplidor") }}
+            <button
+              type="submit"
+              class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+              :disabled="suplidorSubmitting"
+            >
+              {{
+                suplidorSubmitting
+                  ? "Guardando…"
+                  : isEditingSuplidor
+                    ? "Guardar cambios"
+                    : "Crear suplidor"
+              }}
             </button>
           </div>
         </form>
@@ -1422,7 +1660,9 @@ onMounted(load);
         class="my-4 h-full max-h-[90vh] min-h-24 w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-white p-6 shadow-lg"
         role="dialog"
         aria-modal="true"
-        :aria-labelledby="isEditing ? 'editar-documento-title' : 'nuevo-documento-title'"
+        :aria-labelledby="
+          isEditing ? 'editar-documento-title' : 'nuevo-documento-title'
+        "
       >
         <h2
           :id="isEditing ? 'editar-documento-title' : 'nuevo-documento-title'"
@@ -1436,7 +1676,8 @@ onMounted(load);
               ? "Actualiza el nombre, atributos y comentarios de"
               : "Define el contenedor y sus atributos de ERP para"
           }}
-          <span class="font-medium text-gray-700">{{ client?.name }}</span>.
+          <span class="font-medium text-gray-700">{{ client?.name }}</span
+          >.
         </p>
 
         <p
@@ -1475,14 +1716,19 @@ onMounted(load);
           id="comentario-title"
           class="text-lg font-semibold tracking-tight text-gray-900"
         >
-          {{ commentAttr.description ? "Editar comentario" : "Agregar comentario" }}
+          {{
+            commentAttr.description ? "Editar comentario" : "Agregar comentario"
+          }}
         </h2>
         <p class="mt-1 text-sm text-gray-500">
           Para
           <span class="font-medium text-gray-700">{{
             commentAttr.document_type
           }}</span>
-          <span v-if="commentAttr.document_id != null" class="font-mono text-gray-400">
+          <span
+            v-if="commentAttr.document_id != null"
+            class="font-mono text-gray-400"
+          >
             (ERP {{ commentAttr.document_id }})
           </span>
         </p>
@@ -1508,7 +1754,9 @@ onMounted(load);
           {{ commentError }}
         </p>
 
-        <div class="mt-5 flex items-center justify-end gap-2 border-t border-gray-100 pt-4">
+        <div
+          class="mt-5 flex items-center justify-end gap-2 border-t border-gray-100 pt-4"
+        >
           <button
             type="button"
             class="rounded-lg px-3.5 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
@@ -1539,13 +1787,17 @@ onMounted(load);
         class="my-4 h-full max-h-[90vh] min-h-24 w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-white p-6 shadow-lg"
         role="dialog"
         aria-modal="true"
-        :aria-labelledby="isEditingRule ? 'editar-regla-title' : 'nueva-regla-title'"
+        :aria-labelledby="
+          isEditingRule ? 'editar-regla-title' : 'nueva-regla-title'
+        "
       >
         <h2
           :id="isEditingRule ? 'editar-regla-title' : 'nueva-regla-title'"
           class="text-lg font-semibold tracking-tight text-gray-900"
         >
-          {{ isEditingRule ? "Editar regla de negocio" : "Nueva regla de negocio" }}
+          {{
+            isEditingRule ? "Editar regla de negocio" : "Nueva regla de negocio"
+          }}
         </h2>
         <p class="mt-1 text-sm text-gray-500">
           {{
@@ -1553,7 +1805,8 @@ onMounted(load);
               ? "Actualiza el nombre, reglas y contexto de"
               : "Define reglas de negocio opcionales que ayuden a la IA con"
           }}
-          <span class="font-medium text-gray-700">{{ client?.name }}</span>.
+          <span class="font-medium text-gray-700">{{ client?.name }}</span
+          >.
         </p>
 
         <p
@@ -1593,9 +1846,7 @@ onMounted(load);
           class="text-lg font-semibold tracking-tight text-gray-900"
         >
           {{
-            ruleCommentAttr.description
-              ? "Editar contexto"
-              : "Agregar contexto"
+            ruleCommentAttr.description ? "Editar contexto" : "Agregar contexto"
           }}
         </h2>
         <p class="mt-1 text-sm text-gray-500">
@@ -1603,7 +1854,10 @@ onMounted(load);
           <span class="font-medium text-gray-700">{{
             ruleCommentAttr.rule_type
           }}</span>
-          <span v-if="ruleCommentAttr.rule_value" class="font-mono text-gray-400">
+          <span
+            v-if="ruleCommentAttr.rule_value"
+            class="font-mono text-gray-400"
+          >
             ({{ ruleCommentAttr.rule_value }})
           </span>
         </p>
@@ -1629,7 +1883,9 @@ onMounted(load);
           {{ ruleCommentError }}
         </p>
 
-        <div class="mt-5 flex items-center justify-end gap-2 border-t border-gray-100 pt-4">
+        <div
+          class="mt-5 flex items-center justify-end gap-2 border-t border-gray-100 pt-4"
+        >
           <button
             type="button"
             class="rounded-lg px-3.5 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
@@ -1647,6 +1903,45 @@ onMounted(load);
             {{ ruleCommentSaving ? "Guardando…" : "Guardar contexto" }}
           </button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm unmark registered-on-platform -->
+  <div
+    v-if="unregisterConfirmOpen && unregisterTarget"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="unregister-confirm-title"
+  >
+    <div
+      class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl"
+    >
+      <h2
+        id="unregister-confirm-title"
+        class="text-lg font-semibold text-gray-900"
+      >
+        ¿Quitar a "{{ unregisterTarget.nombre }}" de agregados en el sistema?
+      </h2>
+      <p class="mt-2 text-sm text-slate-600">
+        Solo hazlo si aún no está (o ya no está) en Citrus / Carga Masiva.
+      </p>
+      <div class="mt-6 flex justify-end gap-3">
+        <button
+          type="button"
+          class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+          @click="cancelUnregister"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
+          @click="confirmUnregister"
+        >
+          Quitar
+        </button>
       </div>
     </div>
   </div>

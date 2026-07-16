@@ -92,26 +92,40 @@ interface ExtractedSuplidor {
   documento: string;
   tipo_de_documento: string;
   tipo_de_factura: string;
-  isNew: boolean;      // not yet in DB
-  selected: boolean;   // row checkbox — default true
+  isNew: boolean;              // not yet in our DB
+  alreadyInSystem: boolean;    // registered_on_platform / already in Citrus
+  selected: boolean;           // row checkbox — false when alreadyInSystem
 }
 const extractedSuplidores = ref<ExtractedSuplidor[]>([]);
 
+/** Rows that can be exported or saved (not already registered in Citrus). */
+const actionableExtracted = computed(() =>
+  extractedSuplidores.value.filter((s) => !s.alreadyInSystem),
+);
+
 const allExtractedSelected = computed(
-  () => extractedSuplidores.value.length > 0 && extractedSuplidores.value.every((s) => s.selected),
+  () =>
+    actionableExtracted.value.length > 0 &&
+    actionableExtracted.value.every((s) => s.selected),
 );
 function toggleAllExtracted() {
   const val = !allExtractedSelected.value;
-  extractedSuplidores.value.forEach((s) => (s.selected = val));
+  actionableExtracted.value.forEach((s) => {
+    s.selected = val;
+  });
 }
 function removeExtracted(id: string) {
   extractedSuplidores.value = extractedSuplidores.value.filter((s) => s._id !== id);
 }
-// rows to act on: selected ones, or all if nothing is checked
+// rows to act on: selected actionable ones, or all actionable if nothing is checked
 const activeExtracted = computed(() => {
-  const sel = extractedSuplidores.value.filter((s) => s.selected);
-  return sel.length ? sel : extractedSuplidores.value;
+  const actionable = actionableExtracted.value;
+  const sel = actionable.filter((s) => s.selected);
+  return sel.length ? sel : actionable;
 });
+const alreadyInSystemCount = computed(
+  () => extractedSuplidores.value.filter((s) => s.alreadyInSystem).length,
+);
 
 const hasPending = computed(() =>
   fileRows.value.some((r) => r.selected && r.status === "pending"),
@@ -200,13 +214,23 @@ async function analyzeWithAI() {
   scanError.value = null;
   scanning.value = true;
 
-  // build a set of known documentos in DB for "isNew" flagging
+  // Match against saved suplidores: in DB vs already registered in Citrus
   const knownDocs = new Set(
     dbSuplidores.value.map((s) => (s.documento ?? "").toLowerCase()).filter(Boolean),
   );
   const knownNames = new Set(
     dbSuplidores.value
       .filter((s) => !s.documento)
+      .map((s) => s.nombre.toLowerCase()),
+  );
+  const registeredDocs = new Set(
+    dbSuplidores.value
+      .filter((s) => s.registered_on_platform && s.documento)
+      .map((s) => (s.documento ?? "").toLowerCase()),
+  );
+  const registeredNames = new Set(
+    dbSuplidores.value
+      .filter((s) => s.registered_on_platform && !s.documento)
       .map((s) => s.nombre.toLowerCase()),
   );
 
@@ -242,6 +266,8 @@ async function analyzeWithAI() {
 
         const isNew =
           docKey ? !knownDocs.has(docKey) : !knownNames.has(nameKey);
+        const alreadyInSystem =
+          docKey ? registeredDocs.has(docKey) : registeredNames.has(nameKey);
 
         extractedSuplidores.value.push({
           _id: crypto.randomUUID(),
@@ -250,7 +276,9 @@ async function analyzeWithAI() {
           tipo_de_documento: s.tipo_de_documento ?? "",
           tipo_de_factura: s.tipo_de_factura ?? "",
           isNew,
-          selected: true,
+          alreadyInSystem,
+          // Already in Citrus: not selectable for export/save
+          selected: !alreadyInSystem,
         });
       }
       extractedSuplidores.value = [...extractedSuplidores.value];
@@ -271,7 +299,10 @@ const saveSuccess = ref(false);
 
 async function saveToDatabase() {
   if (!selectedClientId.value) return;
-  const toSave = activeExtracted.value.filter((s) => s.nombre);
+  // Never save rows already registered in Citrus; also skip ones already in DB
+  const toSave = activeExtracted.value.filter(
+    (s) => s.nombre && !s.alreadyInSystem && s.isNew,
+  );
   if (!toSave.length) return;
 
   saving.value = true;
@@ -287,7 +318,9 @@ async function saveToDatabase() {
     );
     // mark saved rows as no longer new
     const savedIds = new Set(toSave.map((s) => s._id));
-    extractedSuplidores.value.forEach((s) => { if (savedIds.has(s._id)) s.isNew = false; });
+    extractedSuplidores.value.forEach((s) => {
+      if (savedIds.has(s._id)) s.isNew = false;
+    });
     saveSuccess.value = true;
     setTimeout(() => (saveSuccess.value = false), 3000);
   } catch (e: any) {
@@ -299,7 +332,10 @@ async function saveToDatabase() {
 
 // ── Download template ─────────────────────────────────────────────────────────
 async function downloadTemplate() {
-  const toDownload = activeExtracted.value.filter((s) => s.nombre);
+  // Exclude suppliers already registered in Citrus from the export template
+  const toDownload = activeExtracted.value.filter(
+    (s) => s.nombre && !s.alreadyInSystem,
+  );
   if (!toDownload.length) return;
 
   const res = await fetch(`${API_BASE}/download-suplidores-template`, {
@@ -328,11 +364,35 @@ async function downloadTemplate() {
 // ── DB table: toggle registered ───────────────────────────────────────────────
 const { markAsRegistered } = useClientSuplidores();
 const togglingId = ref<string | null>(null);
+const unregisterConfirmOpen = ref(false);
+const unregisterTarget = ref<ClientSuplidor | null>(null);
 
 async function toggleRegistered(s: ClientSuplidor) {
+  if (s.registered_on_platform) {
+    unregisterTarget.value = s;
+    unregisterConfirmOpen.value = true;
+    return;
+  }
+  await applyRegisteredToggle(s, true);
+}
+
+function cancelUnregister() {
+  unregisterConfirmOpen.value = false;
+  unregisterTarget.value = null;
+}
+
+async function confirmUnregister() {
+  const s = unregisterTarget.value;
+  unregisterConfirmOpen.value = false;
+  unregisterTarget.value = null;
+  if (!s) return;
+  await applyRegisteredToggle(s, false);
+}
+
+async function applyRegisteredToggle(s: ClientSuplidor, value: boolean) {
   togglingId.value = s.id;
   try {
-    const updated = await markAsRegistered(s.id, !s.registered_on_platform);
+    const updated = await markAsRegistered(s.id, value);
     dbSuplidores.value = dbSuplidores.value.map((x) =>
       x.id === updated.id ? updated : x,
     );
@@ -590,14 +650,14 @@ onMounted(async () => {
               <p class="mt-0.5 text-sm text-gray-500">
                 Total de <span class="font-semibold text-gray-700">{{ extractedSuplidores.length }}</span>
                 {{ extractedSuplidores.length === 1 ? "suplidor" : "suplidores" }} extraídos
-                <template v-if="extractedSuplidores.some(s => s.selected) && activeExtracted.length < extractedSuplidores.length">
+                <template v-if="actionableExtracted.some(s => s.selected) && activeExtracted.length < actionableExtracted.length">
                   · <span class="font-medium text-gray-700">{{ activeExtracted.length }} seleccionados</span>
                 </template>.
-                <span v-if="extractedSuplidores.some(s => s.isNew)" class="text-amber-600">
-                  {{ extractedSuplidores.filter(s => s.isNew).length }} nuevos.
+                <span v-if="extractedSuplidores.some(s => s.isNew && !s.alreadyInSystem)" class="text-amber-600">
+                  {{ extractedSuplidores.filter(s => s.isNew && !s.alreadyInSystem).length }} nuevos.
                 </span>
-                <span v-if="extractedSuplidores.some(s => !s.isNew)" class="text-emerald-600">
-                  {{ extractedSuplidores.filter(s => !s.isNew).length }} ya en el sistema.
+                <span v-if="alreadyInSystemCount > 0" class="text-emerald-600">
+                  {{ alreadyInSystemCount }} ya en Citrus (excluidos de exportar/guardar).
                 </span>
               </p>
             </div>
@@ -606,13 +666,13 @@ onMounted(async () => {
               <button
                 type="button"
                 class="rounded-lg border border-emerald-600 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-50"
-                :disabled="saving"
+                :disabled="saving || activeExtracted.length === 0"
                 @click="downloadTemplate"
               >Descargar plantilla</button>
               <button
                 type="button"
                 class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
-                :disabled="saving"
+                :disabled="saving || !activeExtracted.some(s => s.isNew)"
                 @click="saveToDatabase"
               >{{ saving ? "Guardando…" : "Guardar" }}</button>
             </div>
@@ -627,7 +687,8 @@ onMounted(async () => {
                     <input
                       type="checkbox"
                       :checked="allExtractedSelected"
-                      class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600"
+                      :disabled="actionableExtracted.length === 0"
+                      class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600 disabled:opacity-40"
                       @change="toggleAllExtracted"
                     />
                   </th>
@@ -644,11 +705,11 @@ onMounted(async () => {
                   :key="s._id"
                   class="group transition"
                   :class="[
-                    !s.isNew
+                    s.alreadyInSystem
                       ? 'bg-emerald-50/40 opacity-75'
-                      : s.selected
-                        ? 'bg-amber-50/60'
-                        : 'bg-white opacity-50',
+                      : s.isNew
+                        ? (s.selected ? 'bg-amber-50/60' : 'bg-white opacity-50')
+                        : (s.selected ? 'bg-sky-50/50' : 'bg-white opacity-50'),
                   ]"
                 >
                   <!-- row checkbox -->
@@ -656,29 +717,36 @@ onMounted(async () => {
                     <input
                       v-model="s.selected"
                       type="checkbox"
-                      class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600"
+                      :disabled="s.alreadyInSystem"
+                      class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      :title="s.alreadyInSystem ? 'Ya está en Citrus — no se puede exportar ni guardar' : undefined"
                     />
                   </td>
 
-                  <!-- Nombre + already-registered badge -->
+                  <!-- Nombre + already-in-system badge -->
                   <td class="px-5 py-3">
                     <div class="flex items-center gap-2">
-                      <!-- check badge for already-in-system rows -->
                       <span
-                        v-if="!s.isNew"
+                        v-if="s.alreadyInSystem"
                         class="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
-                        title="Ya registrado en el sistema"
+                        title="Ya registrado en Citrus"
                       >
                         <svg class="h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
                         </svg>
                       </span>
+                      <span
+                        v-else-if="!s.isNew"
+                        class="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700"
+                        title="Ya guardado en la base de datos"
+                      >Guardado</span>
                       <input
                         v-model="s.nombre"
                         type="text"
                         maxlength="255"
-                        class="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-medium text-gray-900 outline-none hover:border-gray-200 focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400/20"
-                        :class="!s.isNew ? 'text-gray-500' : ''"
+                        :disabled="s.alreadyInSystem"
+                        class="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-medium text-gray-900 outline-none hover:border-gray-200 focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400/20 disabled:cursor-not-allowed disabled:hover:border-transparent"
+                        :class="s.alreadyInSystem || !s.isNew ? 'text-gray-500' : ''"
                       />
                     </div>
                   </td>
@@ -690,7 +758,8 @@ onMounted(async () => {
                       type="text"
                       maxlength="20"
                       inputmode="numeric"
-                      class="w-32 rounded border border-transparent bg-transparent px-1 py-0.5 font-mono text-xs text-gray-600 outline-none hover:border-gray-200 focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400/20"
+                      :disabled="s.alreadyInSystem"
+                      class="w-32 rounded border border-transparent bg-transparent px-1 py-0.5 font-mono text-xs text-gray-600 outline-none hover:border-gray-200 focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400/20 disabled:cursor-not-allowed disabled:hover:border-transparent"
                       @input="s.documento = s.documento.replace(/\D/g, '').slice(0, 20)"
                     />
                   </td>
@@ -704,7 +773,8 @@ onMounted(async () => {
                   <td class="px-5 py-3">
                     <select
                       v-model="s.tipo_de_factura"
-                      class="rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-gray-700 outline-none hover:border-gray-200 focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400/20"
+                      :disabled="s.alreadyInSystem"
+                      class="rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-gray-700 outline-none hover:border-gray-200 focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400/20 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <option value="">—</option>
                       <option v-for="opt in TIPO_DE_FACTURA_OPTIONS" :key="opt" :value="opt">{{ opt }}</option>
@@ -830,6 +900,40 @@ onMounted(async () => {
           class="h-full w-full rounded border-0 bg-white"
           :title="previewName"
         />
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm unmark registered-on-platform -->
+  <div
+    v-if="unregisterConfirmOpen && unregisterTarget"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="unregister-confirm-title"
+  >
+    <div class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl">
+      <h2 id="unregister-confirm-title" class="text-lg font-semibold text-gray-900">
+        ¿Quitar a "{{ unregisterTarget.nombre }}" de registrados en Citrus?
+      </h2>
+      <p class="mt-2 text-sm text-slate-600">
+        Solo hazlo si aún no está (o ya no está) en la plataforma de Carga Masiva.
+      </p>
+      <div class="mt-6 flex justify-end gap-3">
+        <button
+          type="button"
+          class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+          @click="cancelUnregister"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
+          @click="confirmUnregister"
+        >
+          Quitar
+        </button>
       </div>
     </div>
   </div>

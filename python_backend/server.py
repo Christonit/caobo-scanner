@@ -116,7 +116,7 @@ TEMPLATE_XLSX = DATA_DIR / "template_converted.xlsx"
 # Authoritative Carga Masiva template. We FILL this file (preserving its
 # dropdowns / data-validation named ranges / Nomencladores sheet) instead of
 # recreating it, because the destination system rejects a rebuilt workbook.
-TEMPLATE_XLS_SOURCE = BASE_DIR / "Plantilla_Importar_Gastos.xls"
+TEMPLATE_XLS_SOURCE = BASE_DIR / "assets/template-gastos.xls"
 if not TEMPLATE_XLS_SOURCE.exists():
     TEMPLATE_XLS_SOURCE = TEMPLATE_FILE
 # Internal working copy stays .xlsx (openpyxl); downloadable export is .xls

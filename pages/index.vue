@@ -600,7 +600,7 @@
                 @click="onRowClick($event, file.id)"
               >
                 <td
-                  :class="`px-3 py-2.5 text-center sticky left-0 hover:bg-gray-50 ${isSelected(file.id) ? 'bg-slate-100' : 'bg-white'}`"
+                  :class="`px-3 py-2.5 text-center sticky left-0 hover:bg-gray-50 z-[25] ${isSelected(file.id) ? 'bg-slate-100' : 'bg-white'}`"
                 >
                   <input
                     type="checkbox"
@@ -1522,7 +1522,7 @@
               </button>
               <div
                 v-if="stripNcfColumnDropdownOpen"
-                class="absolute left-0 right-0 z-20 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+                class="absolute left-0 right-0 z-25 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
               >
                 <label
                   v-for="col in STRIP_NCF_COLUMN_OPTIONS"

@@ -53,7 +53,11 @@ const attributes = ref<AttributeRow[]>(rowsFromInitial(props.initial));
 const formError = ref<string | null>(null);
 
 const filledAttributeCount = computed(
-  () => attributes.value.filter((a) => a.ruleType.trim().length > 0).length
+  () =>
+    attributes.value.filter(
+      (a) =>
+        a.ruleValue.trim().length > 0 || a.description.trim().length > 0
+    ).length
 );
 
 const canSubmit = computed(
@@ -89,7 +93,7 @@ function onSubmit() {
       ruleName: ruleName.value,
       attributes: attributes.value.map((a) => ({
         id: a.dbId,
-        ruleType: a.ruleType,
+        ruleType: a.ruleValue,
         ruleValue: a.ruleValue,
         description: a.description,
       })),
@@ -152,7 +156,10 @@ function onSubmit() {
             <span
               class="text-xs font-medium uppercase tracking-wide text-gray-400"
             >
-              Regla {{ index + 1 }}
+              <template v-if="row.ruleValue.trim()">{{
+                row.ruleValue
+              }}</template>
+              <template v-else>Regla {{ index + 1 }}</template>
             </span>
             <button
               type="button"
@@ -164,23 +171,7 @@ function onSubmit() {
             </button>
           </div>
 
-          <div class="grid gap-3 sm:grid-cols-2">
-            <div class="sm:col-span-2">
-              <label
-                :for="`rule-type-${row.key}`"
-                class="mb-1.5 block text-sm font-medium text-gray-700"
-              >
-                Regla
-              </label>
-              <input
-                :id="`rule-type-${row.key}`"
-                v-model="row.ruleType"
-                type="text"
-                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                placeholder="Ej. Facturas sin NCF"
-              />
-            </div>
-
+          <div class="flex flex-col gap-3">
             <div>
               <label
                 :for="`rule-value-${row.key}`"
@@ -198,7 +189,7 @@ function onSubmit() {
               />
             </div>
 
-            <div class="sm:col-span-2">
+            <div>
               <label
                 :for="`rule-desc-${row.key}`"
                 class="mb-1.5 block text-sm font-medium text-gray-700"

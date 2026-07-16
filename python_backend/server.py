@@ -59,7 +59,7 @@ TIPO_DE_GASTO_OPTIONS = [
 # Canonical "Moneda" values: capitalized (first letter only), not upper/title
 # cased - "Peso dominicano" keeps "dominicano" lowercase, "Dólar americano"
 # uses full country qualifier to match the Excel template label.
-MONEDA_OPTIONS = ["Peso dominicano", "Dólar americano", "Euros"]
+MONEDA_OPTIONS = ["Peso dominicano", "Dolar Americano", "Euros"]
 MONEDA_ALIASES = {
     "dop": "Peso dominicano",
     "rd$": "Peso dominicano",
@@ -67,17 +67,17 @@ MONEDA_ALIASES = {
     "pesos": "Peso dominicano",
     "peso dominicano": "Peso dominicano",
     "pesos dominicanos": "Peso dominicano",
-    "usd": "Dólar americano",
-    "us$": "Dólar americano",
-    "$": "Dólar americano",
-    "dolar": "Dólar americano",
-    "dolares": "Dólar americano",
-    "dólar": "Dólar americano",
-    "dólares": "Dólar americano",
-    "dollar": "Dólar americano",
-    "dollars": "Dólar americano",
-    "dólar americano": "Dólar americano",
-    "dolar americano": "Dólar americano",
+    "usd": "Dolar Americano",
+    "us$": "Dolar Americano",
+    "$": "Dolar Americano",
+    "dolar": "Dolar Americano",
+    "dolares": "Dolar Americano",
+    "dólar": "Dolar Americano",
+    "dólares": "Dolar Americano",
+    "dollar": "Dolar Americano",
+    "dollars": "Dolar Americano",
+    "dólar americano": "Dolar Americano",
+    "dolar americano": "Dolar Americano",
     "eur": "Euros",
     "€": "Euros",
     "euro": "Euros",
@@ -151,7 +151,25 @@ if not HISTORY_FILE.exists():
 #   in its own localStorage bucket and disables the button after 5 calls/min.
 INDIVIDUAL_MODEL = "gemma-4-26b-a4b-it"
 # INDIVIDUAL_MODEL = "gemini-3.1-flash-lite"
+# BATCH_MODEL = "gemini-3.5-flash"
 BATCH_MODEL = "gemini-3.1-flash-lite"
+
+
+def _log_gemini_prompt(label: str, content_parts: list) -> None:
+    """Print the full text prompt sent to Gemini (images are counted, not dumped)."""
+    text_parts: list[str] = []
+    image_count = 0
+    for part in content_parts:
+        if isinstance(part, str):
+            text_parts.append(part)
+        else:
+            image_count += 1
+
+    full_prompt = "\n".join(text_parts)
+    print(f"[DEBUG] [{label}] Full Gemini prompt ({len(full_prompt)} chars, {image_count} image(s)):")
+    print("=" * 80)
+    print(full_prompt)
+    print("=" * 80)
 
 
 def list_available_gemini_models(*, generate_content_only: bool = True) -> list[dict]:
@@ -1273,7 +1291,9 @@ def process_gastos_with_gemini(
                 f"images={len(page_images)}, prompt_chars={len(prompt)})"
             )
             model = genai.GenerativeModel(INDIVIDUAL_MODEL)
-            response = model.generate_content([prompt, *page_images])
+            content_parts = [prompt, *page_images]
+            _log_gemini_prompt(f"GEMINI-SINGLE '{filename}'", content_parts)
+            response = model.generate_content(content_parts)
             print(f"[DEBUG] [GEMINI-SINGLE] '{filename}': received response from Gemini API")
 
             if not response or not hasattr(response, "text") or not response.text:
@@ -1482,6 +1502,8 @@ def process_gastos_batch_with_gemini(
                 f"{len(content_parts)}, image_parts={image_part_count}, "
                 f"prompt_chars={len(batch_prompt)})"
             )
+
+            _log_gemini_prompt("GEMINI-BATCH", content_parts)
 
             response = model.generate_content(content_parts)
             print(f"[DEBUG] [GEMINI-BATCH] Received response from Gemini API")

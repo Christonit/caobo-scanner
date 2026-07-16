@@ -12,6 +12,8 @@ import type {
 } from "~/composables/useClientBusinessRules";
 import type { ClientSuplidor, ClientSuplidorInput } from "~/composables/useClientSuplidores";
 import { TIPO_DE_FACTURA_OPTIONS } from "~/composables/useClientSuplidores";
+import type { TaxColumnMapping } from "~/composables/useClientTaxColumnMapping";
+import { TAX_COLUMN_FIELDS } from "~/composables/useClientTaxColumnMapping";
 
 const route = useRoute();
 const clientId = computed(() => route.params.id as string);
@@ -33,8 +35,10 @@ const {
   markAsRegistered,
   remove: removeSuplidor,
 } = useClientSuplidores();
+const { getByClient: getTaxColumnMapping, upsert: upsertTaxColumnMapping } =
+  useClientTaxColumnMapping();
 
-type Tab = "documentos" | "reglas" | "suplidores";
+type Tab = "documentos" | "reglas" | "suplidores" | "impuestos";
 const activeTab = ref<Tab>("documentos");
 
 const client = ref<Client | null>(null);
@@ -99,6 +103,35 @@ const registeredCount = computed(
   () => suplidores.value.filter((s) => s.registered_on_platform).length
 );
 
+// --- Tax column mapping (Impuestos) state --------------------------------
+const TAX_COLUMN_FIELD_LABELS: Record<(typeof TAX_COLUMN_FIELDS)[number], string> = {
+  itbis: "ITBIS",
+  selectivo: "Selectivo",
+  descuento: "Descuento",
+  propina: "Propina",
+};
+const taxMapping = ref<TaxColumnMapping>({});
+const taxMappingSaving = ref(false);
+const taxMappingError = ref<string | null>(null);
+const taxMappingSaved = ref(false);
+
+async function saveTaxMapping() {
+  taxMappingSaving.value = true;
+  taxMappingError.value = null;
+  taxMappingSaved.value = false;
+  try {
+    taxMapping.value = await upsertTaxColumnMapping(clientId.value, taxMapping.value);
+    taxMappingSaved.value = true;
+    setTimeout(() => {
+      taxMappingSaved.value = false;
+    }, 2000);
+  } catch (err: any) {
+    taxMappingError.value = err?.message || "No se pudo guardar la configuración.";
+  } finally {
+    taxMappingSaving.value = false;
+  }
+}
+
 async function load() {
   pending.value = true;
   error.value = null;
@@ -117,6 +150,7 @@ async function load() {
     businessRules.value = await listRulesByClient(clientId.value);
     ruleExpandedIds.value = new Set(businessRules.value.map((r) => r.id));
     suplidores.value = await listSuplidoresByClient(clientId.value);
+    taxMapping.value = await getTaxColumnMapping(clientId.value);
   } catch (err: any) {
     error.value = err?.message || "No se pudo cargar el cliente.";
   } finally {
@@ -523,7 +557,7 @@ onMounted(load);
             Nueva regla
           </button>
           <button
-            v-else
+            v-else-if="activeTab === 'suplidores'"
             type="button"
             class="flex-shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
             @click="openSuplidorForm"
@@ -634,6 +668,22 @@ onMounted(load);
               v-if="suplidores.length > 0"
               class="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600"
             >{{ suplidores.length }}</span>
+          </button>
+          <button
+            type="button"
+            class="relative ml-5 px-1 pb-3 text-sm font-semibold transition"
+            :class="
+              activeTab === 'impuestos'
+                ? 'text-gray-900'
+                : 'text-gray-400 hover:text-gray-600'
+            "
+            @click="activeTab = 'impuestos'"
+          >
+            Impuestos
+            <span
+              v-if="activeTab === 'impuestos'"
+              class="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-emerald-600"
+            />
           </button>
         </div>
 
@@ -1226,6 +1276,60 @@ onMounted(load);
           <p v-if="suplidorFormError && activeTab === 'suplidores'" class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {{ suplidorFormError }}
           </p>
+        </section>
+
+        <!-- ===== Impuestos tab ===== -->
+        <section v-else-if="activeTab === 'impuestos'">
+          <div class="mb-4">
+            <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-400">
+              Columnas de Impuesto
+            </h2>
+            <p class="mt-1 text-sm text-gray-500">
+              La plantilla de Carga Masiva tiene 5 columnas genéricas
+              (Impuesto 1 a 5). Define en cuál de ellas se debe escribir
+              cada monto para este cliente. Deja "No exportar" si un monto
+              no aplica.
+            </p>
+          </div>
+
+          <div class="max-w-lg rounded-xl border border-gray-200 bg-white p-5">
+            <div
+              v-for="field in TAX_COLUMN_FIELDS"
+              :key="field"
+              class="mb-4 flex items-center justify-between gap-4 last:mb-0"
+            >
+              <label class="text-sm font-medium text-gray-700">
+                {{ TAX_COLUMN_FIELD_LABELS[field] }}
+              </label>
+              <select
+                v-model="taxMapping[field]"
+                class="w-44 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+              >
+                <option :value="null">No exportar</option>
+                <option v-for="n in [1, 2, 3, 4, 5]" :key="n" :value="n">
+                  Impuesto {{ n }}
+                </option>
+              </select>
+            </div>
+
+            <p v-if="taxMappingError" class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {{ taxMappingError }}
+            </p>
+
+            <div class="mt-5 flex items-center gap-3 border-t border-gray-100 pt-4">
+              <button
+                type="button"
+                :disabled="taxMappingSaving"
+                class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                @click="saveTaxMapping"
+              >
+                {{ taxMappingSaving ? "Guardando…" : "Guardar" }}
+              </button>
+              <span v-if="taxMappingSaved" class="text-sm font-medium text-emerald-600">
+                Guardado
+              </span>
+            </div>
+          </div>
         </section>
       </template>
     </div>

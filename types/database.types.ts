@@ -174,6 +174,35 @@ export type Database = {
           description?: string | null;
         };
       };
+      client_tax_column_mappings: {
+        Row: {
+          id: string;
+          client_id: string;
+          // Which "Impuesto N" (1-5) column of the export template each
+          // amount is written into. null means "do not export this amount".
+          itbis_column: number | null;
+          selectivo_column: number | null;
+          descuento_column: number | null;
+          propina_column: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          client_id: string;
+          itbis_column?: number | null;
+          selectivo_column?: number | null;
+          descuento_column?: number | null;
+          propina_column?: number | null;
+        };
+        Update: {
+          itbis_column?: number | null;
+          selectivo_column?: number | null;
+          descuento_column?: number | null;
+          propina_column?: number | null;
+          updated_at?: string;
+        };
+      };
       client_suplidores: {
         Row: {
           id: string;

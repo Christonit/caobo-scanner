@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 import openpyxl
 from datetime import date, datetime, time
 import pandas as pd
@@ -406,6 +406,10 @@ SYSTEM_PROMPT = """Tu eres un contador educado y radicado en Republica Dominican
 
     - selectivo: Impuesto selectivo o % LEY si aplica. Normalmente para combustibles y bebidas. Si no aparece, dejar en 0.
 
+    - descuento: Monto del descuento aplicado a la factura, si aparece explicitamente (ej: "Descuento", "Desc.", "Rebaja"). Valor numerico sin simbolo. Si no aparece, dejar en 0.
+
+    - propina: Monto de la propina o servicio, si aparece explicitamente (ej: "Propina", "Servicio", "10% Servicio", "Tip"). Valor numerico sin simbolo. Si no aparece, dejar en 0.
+
     - moneda: Debe ser EXACTAMENTE uno de estos valores (respeta las mayusculas/minusculas tal cual):
     Peso dominicano
     Dólares
@@ -421,7 +425,18 @@ SYSTEM_PROMPT = """Tu eres un contador educado y radicado en Republica Dominican
     + NOTA DE CREDITO
     + MIXTO
 
-    - score: Asigna un score de 1 a 3 para calificar que tan seguro estas de la informacion extraida. 3 = muy seguro, 2 = algo seguro, 1 = poco seguro.
+    - campos_dudosos: Array de strings con los NOMBRES EXACTOS (usa las claves JSON, ej. "documento", "ncf", "ncf_afectado", "monto_en_bienes", "monto_en_servicios", "itbis", "fecha", "nombre") de CUALQUIER campo cuyo valor no puedas leer con 100% de certeza en la imagen. Si todos los campos son perfectamente legibles, devuelve un array vacio [].
+
+    **REGLA CRITICA SOBRE CALIDAD DE IMAGEN Y DIGITOS AMBIGUOS (aplica sobre todo a documento, ncf, ncf_afectado, y tambien a monto/itbis/fecha):**
+    Los campos numericos/alfanumericos (RNC/cedula, NCF, NCF Afectado, montos) NO tienen contexto de idioma que permita "adivinar" un caracter borroso (a diferencia de una palabra, donde el contexto ayuda a inferir). Por lo tanto, si la foto tiene baja resolucion, esta borrosa, deteriorada, con glare/reflejo, doblada, manchada o cortada justo en la zona de un campo, DEBES tratar cualquier caracter que no se pueda distinguir con 100% de certeza como una duda real, AUNQUE tu "mejor adivinanza" parezca razonable y aunque el resto de la factura sea perfectamente legible.
+    Presta especial atencion a pares de digitos que se confunden facilmente cuando la imagen esta degradada: 5 vs 6, 3 vs 8, 0 vs 8 vs 6, 1 vs 7, 2 vs 7, 4 vs 9, 9 vs 8.
+    - Reporta siempre tu lectura mas probable en el campo correspondiente (nombre, documento, ncf, etc.), PERO si tienes cualquier duda real sobre uno o mas de sus caracteres por causa de la calidad/deterioro de la imagen, DEBES incluir el nombre de ese campo en "campos_dudosos". Ejemplo: si en el NCF no puedes distinguir si un digito es "5" o "6" (ej. "...613256" vs "...613266"), agrega "ncf" a campos_dudosos.
+    - No agregues un campo a "campos_dudosos" solo por incertidumbre de negocio (ej. no saber a que categoria de gasto pertenece); es SOLO para cuando la imagen en si mismo impide leer el valor con certeza total.
+
+    - score: Se calcula EN BASE a "campos_dudosos", no lo decidas de forma independiente:
+    + 0 campos en campos_dudosos -> score = 3 (muy seguro)
+    + 1 campo en campos_dudosos -> score = 2 (algo seguro)
+    + 2 o mas campos en campos_dudosos -> score = 1 (poco seguro)
 
     ANTES DE ARROJAR EL EXCEL DEBEN SER VALIDADOS ESTOS DATOS 100%, EN CASO DE NO TENER LA CERTEZA  el score debe ser un 2. Si mas de 1 de estos elementos no es 100% certero, se debe asignar un score de 1 de fiabilidad.
 
@@ -434,7 +449,7 @@ SYSTEM_PROMPT = """Tu eres un contador educado y radicado en Republica Dominican
     5. ITBIS
     6. FECHA: Solo se toma la fecha de emision de la factura, se debe ignorar casos similares 'Valido hasta','NFC Vence', 'Fecha', 'Fecha limite pago'.
 
-    Retornar la informacion en formato JSON con las siguientes claves: nombre, documento, ncf, ncf_afectado, tipo_de_suplidor, tipo_de_gasto, descripcion, fecha, monto_en_servicios, monto_en_bienes, itbis, selectivo, moneda, metodo_de_pago, score.
+    Retornar la informacion en formato JSON con las siguientes claves: nombre, documento, ncf, ncf_afectado, tipo_de_suplidor, tipo_de_gasto, descripcion, fecha, monto_en_servicios, monto_en_bienes, itbis, selectivo, descuento, propina, moneda, metodo_de_pago, campos_dudosos, score.
     """
 
 
@@ -588,6 +603,21 @@ def _parse_catalog_param(raw: Optional[str], param_name: str) -> Optional[list]:
         return None
     if not isinstance(parsed, list):
         print(f"[WARNING] '{param_name}' expected a JSON array, got {type(parsed).__name__}")
+        return None
+    return parsed
+
+
+def _parse_tax_column_mapping_param(raw: Optional[str]) -> Optional[dict]:
+    """Parse the JSON-encoded tax_column_mapping form/query field."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"[WARNING] Could not parse 'tax_column_mapping' as JSON: {e}")
+        return None
+    if not isinstance(parsed, dict):
+        print(f"[WARNING] 'tax_column_mapping' expected a JSON object, got {type(parsed).__name__}")
         return None
     return parsed
 
@@ -838,6 +868,48 @@ def _build_tipo_de_gasto_context_block(
     )
 
 
+# Field names the LLM is allowed to flag in "campos_dudosos". Anything else
+# it returns (typos, business-logic fields, etc.) is dropped defensively.
+CAMPOS_DUDOSOS_VALID_KEYS = {
+    "nombre", "documento", "ncf", "ncf_afectado", "tipo_de_suplidor",
+    "tipo_de_gasto", "descripcion", "fecha", "monto_en_servicios",
+    "monto_en_bienes", "itbis", "selectivo", "descuento", "propina",
+    "moneda", "metodo_de_pago",
+}
+
+
+def _normalize_campos_dudosos(value) -> list[str]:
+    """Coerce the LLM's 'campos_dudosos' into a de-duplicated list of known field keys."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    seen: list[str] = []
+    for item in value:
+        key = str(item or "").strip().lower()
+        if key in CAMPOS_DUDOSOS_VALID_KEYS and key not in seen:
+            seen.append(key)
+    return seen
+
+
+def _score_from_campos_dudosos(campos_dudosos: list[str]) -> int:
+    """
+    Deterministic score derived from how many fields the LLM flagged as
+    uncertain due to image quality: 0 -> 3, 1 -> 2, 2+ -> 1. Mirrors the
+    scoring rule described in SYSTEM_PROMPT, but enforced in code so the
+    model can't self-report a confident score (e.g. 3) while separately
+    admitting a field is ambiguous.
+    """
+    count = len(campos_dudosos)
+    if count == 0:
+        return 3
+    if count == 1:
+        return 2
+    return 1
+
+
 def prepare_export_row(data: dict) -> dict:
     """
     Normalize a receipt dict to Carga Masiva template rules before writing Excel.
@@ -856,6 +928,17 @@ def prepare_export_row(data: dict) -> dict:
             f"[WARNING] NCF {ncf} requires NCF Afectado (B03/B04) but none was provided"
         )
 
+    campos_dudosos = _normalize_campos_dudosos(data.get("campos_dudosos"))
+    reported_score = _to_int_or_none(data.get("score")) or 0
+    if reported_score > 0:
+        # Cap (never raise) the model's self-reported score using the
+        # deterministic rule, so a model that flags an ambiguous field but
+        # still reports score=3 gets overridden down to what the rule says.
+        score = min(reported_score, _score_from_campos_dudosos(campos_dudosos))
+    else:
+        # 0 is the failure/empty-extraction sentinel elsewhere - leave untouched.
+        score = reported_score
+
     return {
         "nombre": nombre,
         "documento": _normalize_documento(data.get("documento", "")),
@@ -873,12 +956,15 @@ def prepare_export_row(data: dict) -> dict:
         "monto_en_bienes": _num(data.get("monto_en_bienes")),
         "itbis": _num(data.get("itbis")),
         "selectivo": _num(data.get("selectivo")),
+        "descuento": _num(data.get("descuento")),
+        "propina": _num(data.get("propina")),
         "moneda": _normalize_moneda(data.get("moneda", "")),
         "metodo_de_pago": str(data.get("metodo_de_pago", "") or "").strip(),
         "concepto_id": _to_int_or_none(data.get("concepto_id")),
         "tipo_de_pago_id": _to_int_or_none(data.get("tipo_de_pago_id")),
         "filename": data.get("filename", "") or "",
-        "score": data.get("score", 0) or 0,
+        "score": score,
+        "campos_dudosos": campos_dudosos,
     }
 
 
@@ -938,8 +1024,15 @@ EXCEL_FIELD_MAPPINGS = {
     "fecha": ["fecha", "date", "fecha factura"],
     "monto_en_servicios": ["monto en servicios", "monto servicios"],
     "monto_en_bienes": ["monto en bienes", "monto bienes"],
-    "itbis": ["itbis", "impuesto 1", "iva"],
-    "selectivo": ["selectivo", "impuesto 2", "% ley"],
+    # The template only exposes 5 generic tax slots (Impuesto 1..5). WHICH
+    # semantic amount (itbis/selectivo/descuento/propina) lands in which slot
+    # is decided per-client by TAX_COLUMN_FIELDS / resolve_tax_columns below,
+    # so these keys (not "itbis"/"selectivo" directly) own the header aliases.
+    "impuesto_1": ["impuesto 1"],
+    "impuesto_2": ["impuesto 2"],
+    "impuesto_3": ["impuesto 3"],
+    "impuesto_4": ["impuesto 4"],
+    "impuesto_5": ["impuesto 5"],
     "moneda": ["moneda", "currency", "divisa"],
     "metodo_de_pago": ["forma de pago", "metodo de pago", "forma pago"],
     "concepto_id": ["concepto id"],
@@ -950,8 +1043,56 @@ EXCEL_TEXT_FIELDS = [
     "nombre", "documento", "ncf", "ncf_afectado", "tipo_de_suplidor", "tipo_de_gasto",
     "descripcion", "moneda", "metodo_de_pago",
 ]
-EXCEL_NUMERIC_FIELDS = ["monto_en_servicios", "monto_en_bienes", "itbis", "selectivo"]
+EXCEL_NUMERIC_FIELDS = [
+    "monto_en_servicios", "monto_en_bienes",
+    "impuesto_1", "impuesto_2", "impuesto_3", "impuesto_4", "impuesto_5",
+]
 EXCEL_INT_FIELDS = ["concepto_id", "tipo_de_pago_id"]
+
+# Amounts that can be routed into one of the 5 "Impuesto" export columns.
+# Matches composables/useClientTaxColumnMapping.ts's TAX_COLUMN_FIELDS.
+TAX_COLUMN_FIELDS = ["itbis", "selectivo", "descuento", "propina"]
+# Fallback used when the client has no configured mapping yet, preserving
+# the export's original (pre-Descuento/Propina) behavior.
+DEFAULT_TAX_COLUMN_MAPPING = {"itbis": 1, "selectivo": 2, "descuento": None, "propina": None}
+
+
+def _clean_tax_column_mapping(mapping: Optional[dict]) -> dict:
+    """
+    Normalize a client's {field: impuesto_slot} mapping. Unknown fields are
+    dropped, out-of-range/duplicate slots fall back to "unmapped" (None) for
+    that field so a bad client config never silently overwrites another
+    field's column, and any field missing from `mapping` keeps its default.
+    """
+    resolved = dict(DEFAULT_TAX_COLUMN_MAPPING)
+    if isinstance(mapping, dict):
+        seen_slots: set[int] = set()
+        for field in TAX_COLUMN_FIELDS:
+            if field not in mapping:
+                continue
+            slot = _to_int_or_none(mapping.get(field))
+            if slot is not None and 1 <= slot <= 5 and slot not in seen_slots:
+                resolved[field] = slot
+                seen_slots.add(slot)
+            else:
+                resolved[field] = None
+    return resolved
+
+
+def resolve_tax_columns(row: dict, tax_column_mapping: Optional[dict]) -> dict:
+    """
+    Given a prepare_export_row()-shaped dict (with itbis/selectivo/descuento/
+    propina already normalized to floats), return {impuesto_1..impuesto_5:
+    float} placing each amount in the client-configured slot. Slots with no
+    field mapped to them default to 0.0.
+    """
+    mapping = _clean_tax_column_mapping(tax_column_mapping)
+    slots = {f"impuesto_{n}": 0.0 for n in range(1, 6)}
+    for field in TAX_COLUMN_FIELDS:
+        slot = mapping.get(field)
+        if slot:
+            slots[f"impuesto_{slot}"] = _num(row.get(field))
+    return slots
 # The template's Fecha column is formatted as a real Excel date (not text);
 # the destination CRM validates it as a date type, so it must be written as
 # an actual date serial, not a "DD/MM/YYYY" string.
@@ -1398,7 +1539,7 @@ def process_batch_with_gemini(
     batch_keys = (
         "nombre, documento, ncf, ncf_afectado, tipo_de_suplidor, tipo_de_gasto, "
         "descripcion, fecha, monto_en_servicios, monto_en_bienes, itbis, "
-        "selectivo, moneda, metodo_de_pago, score"
+        "selectivo, descuento, propina, moneda, metodo_de_pago, campos_dudosos, score"
     )
     if concepto_catalog:
         batch_keys += ", concepto"
@@ -1546,15 +1687,25 @@ def process_batch_with_gemini(
     ]
 
 
-def _fill_template_xls(rows: list) -> Path:
+def _fill_template_xls(rows: list, tax_column_mapping: Optional[dict] = None) -> Path:
     """
     Write OUTPUT_XLS by filling the official Carga Masiva template with the
     given (already normalized) receipt rows. The template's dropdowns, named
     ranges and Nomencladores sheet are preserved verbatim (see xls_template).
+
+    tax_column_mapping: optional per-client {itbis|selectivo|descuento|
+    propina: 1..5} (see composables/useClientTaxColumnMapping.ts) deciding
+    which "Impuesto N" column each amount is written into. Falls back to
+    DEFAULT_TAX_COLUMN_MAPPING (itbis -> Impuesto 1, selectivo -> Impuesto 2)
+    when not provided, matching the export's original behavior.
     """
     if not TEMPLATE_XLS_SOURCE.exists():
         raise FileNotFoundError(f"Template file not found: {TEMPLATE_XLS_SOURCE}")
-    prepared = [prepare_export_row(r) for r in rows]
+    prepared = []
+    for r in rows:
+        row = prepare_export_row(r)
+        row.update(resolve_tax_columns(row, tax_column_mapping))
+        prepared.append(row)
     return fill_xls_template(
         TEMPLATE_XLS_SOURCE,
         OUTPUT_XLS,
@@ -1567,10 +1718,10 @@ def _fill_template_xls(rows: list) -> Path:
     )
 
 
-def populate_excel_template(data: dict):
+def populate_excel_template(data: dict, tax_column_mapping: Optional[dict] = None):
     """Fill the template with a single extracted receipt (fresh export)."""
     try:
-        return _fill_template_xls([data])
+        return _fill_template_xls([data], tax_column_mapping=tax_column_mapping)
     except Exception as e:
         print(f"[ERROR] Excel processing failed: {e}")
         raise
@@ -1628,6 +1779,7 @@ async def upload_file(
     business_rules: Optional[str] = Form(None),
     tipo_de_gasto_context: Optional[str] = Form(None),
     tipo_de_gasto_document_comment: Optional[str] = Form(""),
+    tax_column_mapping: Optional[str] = Form(None),
 ):
     """
     Upload and process a receipt/invoice file (supports: PDF, PNG, JPG, JPEG).
@@ -1657,6 +1809,12 @@ async def upload_file(
     specifically to give the LLM context for THIS client when choosing among
     the FIXED tipo_de_gasto options - it never introduces new tipo_de_gasto
     values, only helps pick among the existing 11.
+
+    tax_column_mapping: optional JSON-encoded {itbis|selectivo|descuento|
+    propina: 1..5} for the client currently being scanned (see
+    client_tax_column_mappings), deciding which "Impuesto N" column of the
+    export each amount is written into. Falls back to the original
+    itbis -> Impuesto 1 / selectivo -> Impuesto 2 behavior when omitted.
     """
     try:
         allowed_extensions = {'.pdf', '.png', '.jpg', '.jpeg'}
@@ -1696,6 +1854,7 @@ async def upload_file(
             _parse_catalog_param(tipo_de_gasto_context, "tipo_de_gasto_context")
         )
         tipo_de_gasto_comment = (tipo_de_gasto_document_comment or "").strip()
+        tax_column_mapping_dict = _parse_tax_column_mapping_param(tax_column_mapping)
 
         # Process with Gemini (rate limited to 5 concurrent)
         async with gemini_semaphore:
@@ -1712,7 +1871,7 @@ async def upload_file(
         
         print(f"[INFO] [/upload] '{file.filename}' processed, score={extracted_data.get('score')}")
 
-        populate_excel_template(extracted_data)
+        populate_excel_template(extracted_data, tax_column_mapping=tax_column_mapping_dict)
         
         # Save to history
         history = load_history()
@@ -1748,6 +1907,7 @@ async def upload_batch(
     business_rules: Optional[str] = Form(None),
     tipo_de_gasto_context: Optional[str] = Form(None),
     tipo_de_gasto_document_comment: Optional[str] = Form(""),
+    tax_column_mapping: Optional[str] = Form(None),
 ):
     """
     Upload and process MULTIPLE receipt/invoice files in a SINGLE Gemini API call.
@@ -1774,6 +1934,11 @@ async def upload_batch(
     document-level comment) for a client_documents container picked
     specifically to help the LLM choose among the FIXED tipo_de_gasto
     options for every file in the batch - never introduces new values.
+
+    tax_column_mapping: optional JSON-encoded {itbis|selectivo|descuento|
+    propina: 1..5} for the client currently being scanned (see
+    client_tax_column_mappings), applied to every file in the batch when
+    writing its amounts into the export's "Impuesto N" columns.
 
     Duplicate detection: files are compared against OTHER FILES IN THIS SAME
     BATCH only (never against previously processed history, so re-scanning
@@ -1896,6 +2061,7 @@ async def upload_batch(
         _parse_catalog_param(tipo_de_gasto_context, "tipo_de_gasto_context")
     )
     tipo_de_gasto_comment = (tipo_de_gasto_document_comment or "").strip()
+    tax_column_mapping_dict = _parse_tax_column_mapping_param(tax_column_mapping)
 
     extracted_results: List[dict] = []
     if batch_inputs:
@@ -1952,7 +2118,7 @@ async def upload_batch(
                 key_to_filename[receipt_key] = entry["filename"]
 
             try:
-                populate_excel_template(data)
+                populate_excel_template(data, tax_column_mapping=tax_column_mapping_dict)
             except Exception as e:
                 print(f"[ERROR] Excel populate failed for {entry['filename']}: {e}")
 
@@ -1994,24 +2160,40 @@ async def upload_batch(
     }
 
 
-def regenerate_excel_from_data(files_data: list):
+def regenerate_excel_from_data(files_data: list, tax_column_mapping: Optional[dict] = None):
     """Regenerate the export by filling the template with edited data.
 
     Score is excluded from export. The template is filled (not recreated) so
     its dropdowns / data validations remain intact for the destination system.
     """
     try:
-        return _fill_template_xls(files_data or [])
+        return _fill_template_xls(files_data or [], tax_column_mapping=tax_column_mapping)
     except Exception as e:
         print(f"[ERROR] Regenerating Excel failed: {e}")
         raise
 
 
 @app.post("/download")
-async def download_excel_post(files_data: Optional[list] = Body(None)):
-    """Download Excel file as .xls. If files_data provided, regenerates with edited data."""
+async def download_excel_post(payload: Optional[Any] = Body(None)):
+    """
+    Download Excel file as .xls. If a body is provided, regenerates with
+    edited data first.
+
+    Accepts either the legacy shape (a bare JSON array of row dicts) or
+    {"files_data": [...], "tax_column_mapping": {...}} where
+    tax_column_mapping is the client's {itbis|selectivo|descuento|propina:
+    1..5} Impuesto-column mapping (see composables/useClientTaxColumnMapping.ts).
+    """
+    files_data: Optional[list] = None
+    tax_column_mapping: Optional[dict] = None
+    if isinstance(payload, list):
+        files_data = payload
+    elif isinstance(payload, dict):
+        files_data = payload.get("files_data")
+        tax_column_mapping = payload.get("tax_column_mapping")
+
     if files_data:
-        regenerate_excel_from_data(files_data)
+        regenerate_excel_from_data(files_data, tax_column_mapping=tax_column_mapping)
     
     if not OUTPUT_XLS.exists():
         if OUTPUT_FILE.exists():

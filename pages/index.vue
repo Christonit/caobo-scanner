@@ -625,6 +625,14 @@
                       ).replace(/\D/g, '')
                     "
                     class="w-28 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    :class="{
+                      [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'documento'),
+                    }"
+                    :title="
+                      isFieldDudoso(file, 'documento')
+                        ? 'Imagen poco clara - validar manualmente'
+                        : ''
+                    "
                     placeholder="-"
                   />
                 </td>
@@ -671,6 +679,14 @@
                     maxlength="255"
                     @focus="startEditing(file)"
                     class="w-full rounded border border-transparent bg-transparent px-2 py-1 text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 text-ellipsis"
+                    :class="{
+                      [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'nombre'),
+                    }"
+                    :title="
+                      isFieldDudoso(file, 'nombre')
+                        ? 'Imagen poco clara - validar manualmente'
+                        : ''
+                    "
                     placeholder="-"
                   />
                 </td>
@@ -687,6 +703,14 @@
                       )
                     "
                     class="w-36 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    :class="{
+                      [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'ncf'),
+                    }"
+                    :title="
+                      isFieldDudoso(file, 'ncf')
+                        ? 'Imagen poco clara - validar manualmente'
+                        : ''
+                    "
                     placeholder="-"
                   />
                 </td>
@@ -696,6 +720,12 @@
                     v-model="file.editableData.tipo_de_suplidor"
                     @focus="startEditing(file)"
                     class="w-36 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    :class="{
+                      [DUDOSO_FIELD_CLASSES]: isFieldDudoso(
+                        file,
+                        'tipo_de_suplidor',
+                      ),
+                    }"
                   >
                     <option value="">-</option>
                     <option
@@ -724,6 +754,12 @@
                     v-model="file.editableData.tipo_de_gasto"
                     @focus="startEditing(file)"
                     class="w-64 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 text-ellipsis"
+                    :class="{
+                      [DUDOSO_FIELD_CLASSES]: isFieldDudoso(
+                        file,
+                        'tipo_de_gasto',
+                      ),
+                    }"
                   >
                     <option value="">-</option>
                     <option
@@ -751,8 +787,16 @@
                   <button
                     type="button"
                     class="group relative flex w-36 items-center rounded border border-transparent bg-transparent px-2 py-1 text-left text-sm text-slate-600 transition-colors hover:border-emerald-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    :class="{
+                      [DUDOSO_FIELD_CLASSES]: isFieldDudoso(
+                        file,
+                        'descripcion',
+                      ),
+                    }"
                     :title="
-                      file.editableData.descripcion || 'Editar descripción'
+                      isFieldDudoso(file, 'descripcion')
+                        ? 'Imagen poco clara - validar manualmente'
+                        : file.editableData.descripcion || 'Editar descripción'
                     "
                     @click="openDescripcionEditor(file)"
                   >
@@ -797,6 +841,14 @@
                       )
                     "
                     class="w-24 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    :class="{
+                      [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'fecha'),
+                    }"
+                    :title="
+                      isFieldDudoso(file, 'fecha')
+                        ? 'Imagen poco clara - validar manualmente'
+                        : ''
+                    "
                     placeholder="DD/MM/AAAA"
                   />
                 </td>
@@ -810,6 +862,12 @@
                       v-model="file.editableData.monto_en_servicios"
                       @focus="startEditing(file)"
                       class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-700 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      :class="{
+                        [DUDOSO_FIELD_CLASSES]: isFieldDudoso(
+                          file,
+                          'monto_en_servicios',
+                        ),
+                      }"
                       placeholder="0"
                     />
                   </div>
@@ -824,6 +882,12 @@
                       v-model="file.editableData.monto_en_bienes"
                       @focus="startEditing(file)"
                       class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-700 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      :class="{
+                        [DUDOSO_FIELD_CLASSES]: isFieldDudoso(
+                          file,
+                          'monto_en_bienes',
+                        ),
+                      }"
                       placeholder="0"
                     />
                   </div>
@@ -837,6 +901,9 @@
                       v-model="file.editableData.itbis"
                       @focus="startEditing(file)"
                       class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      :class="{
+                        [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'itbis'),
+                      }"
                       placeholder="-"
                     />
                   </div>
@@ -850,6 +917,47 @@
                       v-model="file.editableData.selectivo"
                       @focus="startEditing(file)"
                       class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      :class="{
+                        [DUDOSO_FIELD_CLASSES]: isFieldDudoso(
+                          file,
+                          'selectivo',
+                        ),
+                      }"
+                      placeholder="-"
+                    />
+                  </div>
+                </td>
+                <!-- Descuento -->
+                <td v-if="showFullTableColumns" class="px-2 py-2.5">
+                  <div class="flex items-center">
+                    <span class="mr-1 text-sm text-gray-400">$</span>
+                    <input
+                      type="text"
+                      v-model="file.editableData.descuento"
+                      @focus="startEditing(file)"
+                      class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      :class="{
+                        [DUDOSO_FIELD_CLASSES]: isFieldDudoso(
+                          file,
+                          'descuento',
+                        ),
+                      }"
+                      placeholder="-"
+                    />
+                  </div>
+                </td>
+                <!-- Propina -->
+                <td v-if="showFullTableColumns" class="px-2 py-2.5">
+                  <div class="flex items-center">
+                    <span class="mr-1 text-sm text-gray-400">$</span>
+                    <input
+                      type="text"
+                      v-model="file.editableData.propina"
+                      @focus="startEditing(file)"
+                      class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      :class="{
+                        [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'propina'),
+                      }"
                       placeholder="-"
                     />
                   </div>
@@ -861,6 +969,9 @@
                     v-model="file.editableData.moneda"
                     @focus="startEditing(file)"
                     class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm uppercase text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    :class="{
+                      [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'moneda'),
+                    }"
                     placeholder="-"
                   />
                 </td>
@@ -871,6 +982,12 @@
                     v-model="file.editableData.metodo_de_pago"
                     @focus="startEditing(file)"
                     class="w-40 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    :class="{
+                      [DUDOSO_FIELD_CLASSES]: isFieldDudoso(
+                        file,
+                        'metodo_de_pago',
+                      ),
+                    }"
                     placeholder="-"
                   />
                 </td>
@@ -947,15 +1064,22 @@
                     "
                     class="w-28 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
                     :class="{
+                      [DUDOSO_FIELD_CLASSES]: isFieldDudoso(
+                        file,
+                        'ncf_afectado',
+                      ),
                       'ring-1 ring-amber-400':
+                        !isFieldDudoso(file, 'ncf_afectado') &&
                         requiresNcfAfectado(file.editableData.ncf) &&
                         !file.editableData.ncf_afectado,
                     }"
                     placeholder="-"
                     :title="
-                      requiresNcfAfectado(file.editableData.ncf)
-                        ? 'Obligatorio cuando NCF es B03 o B04'
-                        : ''
+                      isFieldDudoso(file, 'ncf_afectado')
+                        ? 'Imagen poco clara - validar manualmente'
+                        : requiresNcfAfectado(file.editableData.ncf)
+                          ? 'Obligatorio cuando NCF es B03 o B04'
+                          : ''
                     "
                   />
                 </td>
@@ -1333,8 +1457,8 @@
                   Remover nomenclaturas NCF
                 </p>
                 <p v-if="stripNcfCardOpen" class="mt-0.5 text-xs text-gray-400">
-                  Al exportar, quita del inicio del valor las series tipadas (ej.
-                  B01 → 00222157). Los ceros que queden se conservan.
+                  Al exportar, quita del inicio del valor las series tipadas
+                  (ej. B01 → 00222157). Los ceros que queden se conservan.
                 </p>
               </div>
             </button>
@@ -1698,7 +1822,7 @@
   <Transition name="slide">
     <aside
       v-if="previewFile"
-      class="fixed right-0 top-0 flex h-full flex-col border-l border-gray-200 bg-white shadow-2xl z-90"
+      class="fixed right-0 top-0 flex h-full flex-col border-l border-gray-200 bg-white shadow-2xl z-100"
       :style="{ width: `${previewWidth}px` }"
     >
       <div
@@ -2076,6 +2200,7 @@ const { listByClient } = useClientDocuments();
 const { listByClient: listBusinessRulesByClient } = useClientBusinessRules();
 const { upsertFromScan, listByClient: listSuplidoresByClient } =
   useClientSuplidores();
+const { getByClient: getClientTaxColumnMapping } = useClientTaxColumnMapping();
 
 const clients = ref([]);
 const clientsLoading = ref(false);
@@ -2097,6 +2222,12 @@ const clientDocumentsError = ref(null);
 // Concepto/Tipo de Pago catalogs, independent of which documents are
 // selected above.
 const clientBusinessRules = ref([]);
+
+// Which "Impuesto N" (1-5) export column each amount (ITBIS/Selectivo/
+// Descuento/Propina) goes into for the selected client - see "Impuestos"
+// tab on the client detail page. Defaults to itbis->1/selectivo->2 (the
+// original hardcoded behavior) when the client has no mapping configured.
+const clientTaxColumnMapping = ref({});
 
 const canScan = computed(() =>
   Boolean(
@@ -2208,6 +2339,7 @@ const loadClients = async () => {
 const loadClientDocumentsAndRules = async (preferredSelection = null) => {
   clientDocuments.value = [];
   clientBusinessRules.value = [];
+  clientTaxColumnMapping.value = {};
   if (!selectedClientId.value) return;
 
   clientDocumentsLoading.value = true;
@@ -2243,6 +2375,17 @@ const loadClientDocumentsAndRules = async (preferredSelection = null) => {
     );
   } catch (err) {
     console.warn("[Business rules] No se pudieron cargar:", err);
+  }
+
+  // Tax column mapping is optional context too - fail silently so a
+  // missing/unconfigured mapping never blocks scanning/export (the backend
+  // falls back to itbis->Impuesto 1 / selectivo->Impuesto 2 by default).
+  try {
+    clientTaxColumnMapping.value = await getClientTaxColumnMapping(
+      selectedClientId.value,
+    );
+  } catch (err) {
+    console.warn("[Tax column mapping] No se pudo cargar:", err);
   }
 };
 
@@ -2335,6 +2478,8 @@ const ALL_COLUMNS = [
   "Monto Bienes",
   "ITBIS",
   "Selectivo",
+  "Descuento",
+  "Propina",
   "Moneda",
   "Forma de Pago",
   "Concepto Id",
@@ -3404,12 +3549,15 @@ const createFileItem = (file, sourceId = null) => {
       monto_en_bienes: "",
       itbis: "",
       selectivo: "",
+      descuento: "",
+      propina: "",
       moneda: "",
       metodo_de_pago: "",
       concepto_id: null,
       tipo_de_pago_id: null,
     },
     score: 0,
+    camposDudosos: [],
     processingTime: null,
   };
 };
@@ -3585,6 +3733,8 @@ const isEdited = (file) => {
     file.editableData.monto_en_bienes !== file.originalData.monto_en_bienes ||
     file.editableData.itbis !== file.originalData.itbis ||
     file.editableData.selectivo !== file.originalData.selectivo ||
+    file.editableData.descuento !== file.originalData.descuento ||
+    file.editableData.propina !== file.originalData.propina ||
     file.editableData.moneda !== file.originalData.moneda ||
     file.editableData.metodo_de_pago !== file.originalData.metodo_de_pago ||
     file.editableData.descripcion !== file.originalData.descripcion ||
@@ -3666,6 +3816,9 @@ const removeSourceDocument = (doc) => {
 const applyExtractedData = (fileItem, data) => {
   fileItem.data = data;
   fileItem.score = data.score || 0;
+  fileItem.camposDudosos = Array.isArray(data.campos_dudosos)
+    ? data.campos_dudosos
+    : [];
 
   fileItem.editableData = {
     filename: fileItem.name,
@@ -3688,6 +3841,9 @@ const applyExtractedData = (fileItem, data) => {
     itbis: data.itbis || data.itbis === 0 ? String(data.itbis) : "0",
     selectivo:
       data.selectivo || data.selectivo === 0 ? String(data.selectivo) : "0",
+    descuento:
+      data.descuento || data.descuento === 0 ? String(data.descuento) : "0",
+    propina: data.propina || data.propina === 0 ? String(data.propina) : "0",
     moneda: data.moneda || "",
     metodo_de_pago: data.metodo_de_pago || "",
     concepto_id: data.concepto_id ?? null,
@@ -3776,6 +3932,12 @@ const runSingleFileEvaluation = async (fileItem) => {
       "tipo_de_gasto_document_comment",
       tipoDeGastoDocumentComment.value,
     );
+    if (Object.keys(clientTaxColumnMapping.value).length) {
+      formData.append(
+        "tax_column_mapping",
+        JSON.stringify(clientTaxColumnMapping.value),
+      );
+    }
 
     const response = await fetch(`${API_BASE}/upload`, {
       method: "POST",
@@ -3942,6 +4104,16 @@ const getScoreClasses = (score) => {
   return "bg-gray-100 text-slate-600";
 };
 
+// Whether the backend flagged `field` as unreadable-with-certainty on this
+// receipt (e.g. an NCF digit that could be a "5" or a "6" on a degraded
+// scan) - used to highlight that specific cell so it gets manual review.
+const isFieldDudoso = (file, field) =>
+  Array.isArray(file?.camposDudosos) && file.camposDudosos.includes(field);
+
+// Shared classes for the yellow "needs manual validation" highlight.
+const DUDOSO_FIELD_CLASSES =
+  "bg-amber-100 ring-1 ring-amber-400 focus:ring-amber-400";
+
 const formatTime = (milliseconds) => {
   if (milliseconds < 1000) {
     return `${milliseconds.toFixed(0)}ms`;
@@ -4044,6 +4216,12 @@ const processAll = async () => {
         "tipo_de_gasto_document_comment",
         tipoDeGastoDocumentComment.value,
       );
+      if (Object.keys(clientTaxColumnMapping.value).length) {
+        formData.append(
+          "tax_column_mapping",
+          JSON.stringify(clientTaxColumnMapping.value),
+        );
+      }
 
       const response = await fetch(`${API_BASE}/upload-batch`, {
         method: "POST",
@@ -4266,6 +4444,8 @@ const downloadExcel = async () => {
         monto_en_bienes: d.monto_en_bienes || "0",
         itbis: d.itbis || "0",
         selectivo: d.selectivo || "0",
+        descuento: d.descuento || "0",
+        propina: d.propina || "0",
         moneda: d.moneda || "",
         metodo_de_pago: d.metodo_de_pago || "",
         concepto_id: d.concepto_id,
@@ -4285,7 +4465,10 @@ const downloadExcel = async () => {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(filesData),
+      body: JSON.stringify({
+        files_data: filesData,
+        tax_column_mapping: clientTaxColumnMapping.value,
+      }),
     });
 
     const blob = await response.blob();

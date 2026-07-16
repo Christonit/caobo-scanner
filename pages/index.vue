@@ -996,7 +996,12 @@
                   <select
                     v-model="file.editableData.concepto_id"
                     @focus="startEditing(file)"
-                    class="w-48 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    :class="[
+                      'w-48 rounded border px-1 py-1 text-sm text-slate-600 transition-colors hover:border-gray-300 focus:outline-none focus:ring-1',
+                      isFieldDudoso(file, 'concepto_id')
+                        ? 'bg-amber-100 border-amber-400 ring-1 ring-amber-400 focus:ring-amber-400'
+                        : 'border-transparent bg-transparent focus:border-emerald-500 focus:ring-emerald-500/40',
+                    ]"
                   >
                     <option :value="null">-</option>
                     <option
@@ -1822,7 +1827,7 @@
   <Transition name="slide">
     <aside
       v-if="previewFile"
-      class="fixed right-0 top-0 flex h-full flex-col border-l border-gray-200 bg-white shadow-2xl z-100"
+      class="fixed right-0 top-0 flex h-full flex-col border-l border-gray-200 bg-white shadow-2xl z-[100]"
       :style="{ width: `${previewWidth}px` }"
     >
       <div

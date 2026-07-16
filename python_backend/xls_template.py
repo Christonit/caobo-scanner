@@ -1,7 +1,12 @@
 """
-Fill the official Carga Masiva template (.xls) IN PLACE instead of recreating it.
+Fill official Carga Masiva templates (.xls) IN PLACE instead of recreating them.
 
-The template `Plantilla_Importar_Gastos.xls` is a legacy BIFF8 (.xls) workbook
+Exposes two public entry points:
+  - fill_gastos_xls_template   – fills the Gastos (expenses) template
+  - fill_suplidores_xls_template – fills the Suplidores (suppliers) template
+
+Both rely on the same underlying BIFF8 stream-editing engine. The templates are
+legacy BIFF8 (.xls) workbooks
 that ships with data-validation dropdowns (Tipo de Suplidor, Tipo de Gasto,
 Forma de Pago, Retenciones...) backed by named ranges that point at the
 `Nomencladores` sheet. The destination accounting system relies on that exact
@@ -264,7 +269,7 @@ def _parse_ddmmyyyy(text: str):
         return None
 
 
-def fill_xls_template(
+def fill_gastos_xls_template(
     template_path: Path,
     out_path: Path,
     rows: list,
@@ -500,3 +505,53 @@ def fill_xls_template(
     out_stream = _serialize(new_records)
     XlsDoc().save(str(out_path), out_stream)
     return out_path
+
+
+# ---------------------------------------------------------------------------
+# Suplidores template entry point
+# ---------------------------------------------------------------------------
+
+# Column aliases matching the "Listado de Suplidores" sheet headers.
+_SUPLIDORES_FIELD_MAPPINGS = {
+    "documento":      ["documento"],
+    "nombre":         ["nombre"],
+    "tipo_de_factura": ["tipo de factura"],
+    "direccion":      ["dirección", "direccion"],
+    "provincia":      ["provincia"],
+}
+
+_SUPLIDORES_TEXT_FIELDS = [
+    "documento", "nombre", "tipo_de_factura", "direccion", "provincia"
+]
+
+
+def fill_suplidores_xls_template(
+    template_path: Path,
+    out_path: Path,
+    rows: list,
+) -> Path:
+    """
+    Write `out_path` as a copy of the official Carga Masiva Suplidores
+    template with `rows` filled into the first worksheet ("Listado de
+    Suplidores"), preserving every dropdown, named range, and the
+    Nomencladores sheet verbatim.
+
+    Each row dict must have at minimum:
+        - documento  (str, digits only)
+        - nombre     (str)
+        - tipo_de_factura (str, one of the template's dropdown values)
+
+    Optional:
+        - direccion  (str, may be empty)
+        - provincia  (str, may be empty)
+    """
+    return fill_gastos_xls_template(
+        template_path=template_path,
+        out_path=out_path,
+        rows=rows,
+        field_mappings=_SUPLIDORES_FIELD_MAPPINGS,
+        text_fields=_SUPLIDORES_TEXT_FIELDS,
+        numeric_fields=[],
+        int_fields=[],
+        date_fields=(),
+    )

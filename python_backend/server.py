@@ -1,5 +1,8 @@
 """
-FastAPI server for processing receipts/invoices with Gemini AI
+FastAPI server for processing receipts/invoices with Gemini AI — gastos (expenses) flow.
+
+Suplidores (suppliers) routes live in suplidores_server.py and are mounted
+via app.include_router() at the bottom of this file.
 """
 import asyncio
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body, Form
@@ -11,13 +14,20 @@ import os
 from pathlib import Path
 import re
 from typing import Any, List, Optional, Tuple
-import openpyxl
 from datetime import date, datetime, time
-import pandas as pd
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-from xls_template import fill_xls_template
+from shared_utils import (
+    PDF_MAX_PAGES,
+    PDF_RENDER_DPI,
+    _is_retryable_error,
+    _strip_markdown_fences,
+    gemini_semaphore,
+    load_file_as_images,
+    render_pdf_to_images,
+)
+from xls_template import fill_gastos_xls_template
 
 
 # Allowed catalog values from the Carga Masiva "Nomencladores" sheet.
@@ -47,9 +57,9 @@ TIPO_DE_GASTO_OPTIONS = [
 ]
 
 # Canonical "Moneda" values: capitalized (first letter only), not upper/title
-# cased - "Peso dominicano" keeps "dominicano" lowercase, "Dólares"/"Euros"
-# keep their natural single-word capitalization.
-MONEDA_OPTIONS = ["Peso dominicano", "Dólares", "Euros"]
+# cased - "Peso dominicano" keeps "dominicano" lowercase, "Dólar americano"
+# uses full country qualifier to match the Excel template label.
+MONEDA_OPTIONS = ["Peso dominicano", "Dólar americano", "Euros"]
 MONEDA_ALIASES = {
     "dop": "Peso dominicano",
     "rd$": "Peso dominicano",
@@ -57,15 +67,17 @@ MONEDA_ALIASES = {
     "pesos": "Peso dominicano",
     "peso dominicano": "Peso dominicano",
     "pesos dominicanos": "Peso dominicano",
-    "usd": "Dólares",
-    "us$": "Dólares",
-    "$": "Dólares",
-    "dolar": "Dólares",
-    "dolares": "Dólares",
-    "dólar": "Dólares",
-    "dólares": "Dólares",
-    "dollar": "Dólares",
-    "dollars": "Dólares",
+    "usd": "Dólar americano",
+    "us$": "Dólar americano",
+    "$": "Dólar americano",
+    "dolar": "Dólar americano",
+    "dolares": "Dólar americano",
+    "dólar": "Dólar americano",
+    "dólares": "Dólar americano",
+    "dollar": "Dólar americano",
+    "dollars": "Dólar americano",
+    "dólar americano": "Dólar americano",
+    "dolar americano": "Dólar americano",
     "eur": "Euros",
     "€": "Euros",
     "euro": "Euros",
@@ -111,32 +123,23 @@ app.add_middleware(
 )
 
 HISTORY_FILE = DATA_DIR / "history.json"
-TEMPLATE_FILE = BASE_DIR / "template.xls"
-TEMPLATE_XLSX = DATA_DIR / "template_converted.xlsx"
-# Authoritative Carga Masiva template. We FILL this file (preserving its
-# dropdowns / data-validation named ranges / Nomencladores sheet) instead of
-# recreating it, because the destination system rejects a rebuilt workbook.
-TEMPLATE_XLS_SOURCE = BASE_DIR / "assets/template-gastos.xls"
-if not TEMPLATE_XLS_SOURCE.exists():
-    TEMPLATE_XLS_SOURCE = TEMPLATE_FILE
+# Authoritative Carga Masiva Gastos template. We FILL this file (preserving
+# its dropdowns / data-validation named ranges / Nomencladores sheet) instead
+# of recreating it, because the destination system rejects a rebuilt workbook.
+GASTOS_TEMPLATE_XLS_SOURCE = BASE_DIR / "assets/templates/template-gastos.xls"
 # Internal working copy stays .xlsx (openpyxl); downloadable export is .xls
 # because destination systems (e.g. Carga Masiva) reject .xlsx uploads.
-OUTPUT_FILE = DATA_DIR / "output.xlsx"
-OUTPUT_XLS = DATA_DIR / "output.xls"
+GASTOS_OUTPUT_FILE = DATA_DIR / "output.xlsx"
+GASTOS_OUTPUT_XLS = DATA_DIR / "output.xls"
 
 print(f"[INFO] Base directory: {BASE_DIR}")
 print(f"[INFO] Data directory: {DATA_DIR}")
-print(f"[INFO] Template file: {TEMPLATE_FILE}")
+print(f"[INFO] Gastos template: {GASTOS_TEMPLATE_XLS_SOURCE}")
 
 # Ensure history file exists
 if not HISTORY_FILE.exists():
     with open(HISTORY_FILE, 'w') as f:
         json.dump([], f)
-
-# Rate limiting for Gemini API (5 requests per minute)
-# Using a semaphore to limit concurrent requests
-GEMINI_MAX_CONCURRENT = 5
-gemini_semaphore = asyncio.Semaphore(GEMINI_MAX_CONCURRENT)
 
 # Model selection.
 # - INDIVIDUAL calls (single-file /upload, retry, reevaluate) use gemma-4-26b
@@ -231,64 +234,6 @@ def _new_dedupe_state() -> Tuple[set, dict, set, dict]:
     return set(), {}, set(), {}
 
 
-def create_template_xlsx(xlsx_path: Path):
-    """Create a template .xlsx file that matches the original template structure."""
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-    try:
-        wb = openpyxl.Workbook()
-        wb.remove(wb.active)
-        
-        ws = wb.create_sheet(title="Listado de Gastos")
-        headers = ["Nombre", "Documento", "Tipo de Suplidor", "Tipo de Gasto", "Descripcion", "Fecha", "Monto en Servicios"]
-        
-        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-        bold_font = Font(bold=True)
-        thin_border = Border(
-            left=Side(style='thin'), right=Side(style='thin'),
-            top=Side(style='thin'), bottom=Side(style='thin')
-        )
-        center_align = Alignment(horizontal='center', vertical='center')
-        
-        for col_idx, header in enumerate(headers, start=1):
-            cell = ws.cell(row=1, column=col_idx, value=header)
-            cell.fill = yellow_fill
-            cell.font = bold_font
-            cell.border = thin_border
-            cell.alignment = center_align
-        
-        column_widths = {'A': 20, 'B': 20, 'C': 18, 'D': 18, 'E': 35, 'F': 15, 'G': 20}
-        for col_letter, width in column_widths.items():
-            ws.column_dimensions[col_letter].width = width
-        
-        ws.auto_filter.ref = "A1:G1"
-        
-        ws2 = wb.create_sheet(title="Nomencladores")
-        ws2.cell(row=1, column=1, value="Tipo de Suplidor")
-        ws2.cell(row=1, column=2, value="Tipo de Gasto")
-        
-        wb.save(xlsx_path)
-        return True
-        
-    except Exception as e:
-        print(f"[ERROR] Creating template failed: {e}")
-        return False
-
-
-def ensure_template_xlsx():
-    """Ensure we have a .xlsx template file."""
-    if TEMPLATE_XLSX.exists():
-        return TEMPLATE_XLSX
-    
-    xlsx_template = BASE_DIR / "template.xlsx"
-    if xlsx_template.exists():
-        return xlsx_template
-    
-    if create_template_xlsx(TEMPLATE_XLSX):
-        return TEMPLATE_XLSX
-    return None
-
-
 def convert_xlsx_to_xls(xlsx_path: Path, xls_path: Path) -> Path:
     """Convert an .xlsx workbook to Excel 97-2003 .xls (BIFF8)."""
     import xlwt
@@ -352,13 +297,7 @@ def convert_xlsx_to_xls(xlsx_path: Path, xls_path: Path) -> Path:
     return xls_path
 
 
-def save_workbook_as_xls(wb, xlsx_path: Path = OUTPUT_FILE, xls_path: Path = OUTPUT_XLS) -> Path:
-    """Persist the openpyxl workbook as .xlsx, then emit a downloadable .xls copy."""
-    wb.save(xlsx_path)
-    return convert_xlsx_to_xls(xlsx_path, xls_path)
-
-
-SYSTEM_PROMPT = """Tu eres un contador educado y radicado en Republica Dominicana, experto en temas fiscales, te encargas de procesar recibos de pago y facturas de proveedores para luego ingresarlos en el sistema de contabilidad.
+GASTOS_SYSTEM_PROMPT = """Tu eres un contador educado y radicado en Republica Dominicana, experto en temas fiscales, te encargas de procesar recibos de pago y facturas de proveedores para luego ingresarlos en el sistema de contabilidad.
 
     Tu tarea es extraer la siguiente informacion del recibo/factura y retornarla en formato JSON para ser utilizado en el sistema de contabilidad:
 
@@ -367,6 +306,16 @@ SYSTEM_PROMPT = """Tu eres un contador educado y radicado en Republica Dominican
     - documento: El RNC/cedula(numero de identifcacion de la persona)/numero de pasaporte del suplidor. SOLO digitos, sin guiones ni caracteres especiales (ej: "101702176", "00200078964", "987356102"). Si aparece como "101-70217-6", devolver "101702176".
 
     - ncf: El NCF (Numero de Comprobante Fiscal). Es un codigo alfanumerico que empieza con una letra (B, E, etc.) seguido de digitos. Ejemplo: E310001987518, B0100014525. Si el valor viene con ceros a la izquierda ANTES de B01 o B02 (ej: "0000000B0100222157"), quita esos ceros y devolver "B0100222157". El B0# puede llegar hasta B09 NO quites ceros internos ni ceros de series E31 u otras (ej: "E310000029838" se deja tal cual).
+
+    **PROTOCOLO OBLIGATORIO PARA LEER EL NCF — sigue estos pasos en orden:**
+    Paso 1. Localiza el NCF en la imagen (normalmente aparece junto a la etiqueta "NCF", "Comprobante Fiscal" o "No. Comprobante").
+    Paso 2. Lee el codigo CARACTER POR CARACTER de izquierda a derecha, sin saltarte ninguno. Presta atencion especial a zonas con ceros consecutivos: los ceros se parecen entre si y es facil omitir uno o insertar uno de mas.
+    Paso 3. Cuenta el total de caracteres del resultado:
+       - Serie E31 → DEBE TENER EXACTAMENTE 13 caracteres (1 letra + 12 digitos).
+       - Serie B0x → DEBE TENER EXACTAMENTE 11 caracteres (3 letras/digitos + 8 digitos).
+    Paso 4. Si el conteo NO coincide con el esperado, o si tuviste cualquier duda al leer un caracter, agrega "ncf" a "campos_dudosos" Y ajusta el score.
+    Paso 5. NUNCA insertes ni elimines ceros internos para "cuadrar" el largo; reporta lo que ves aunque el largo quede mal — eso sera detectado automaticamente.
+    Ejemplo de error comun: factura tiene "E310000638833" (13 chars) pero el modelo lee "E310000063883" (tambien 13 chars, con un 0 extra insertado y un 3 faltante) — este tipo de transposicion DEBE llevar "ncf" en campos_dudosos.
 
     - ncf_afectado: NCF modificado/afectado cuando el comprobante es nota de credito (B03) o nota de debito (B04). Maximo 11 caracteres. Si el NCF NO es B03/B04, dejar "".
 
@@ -412,7 +361,7 @@ SYSTEM_PROMPT = """Tu eres un contador educado y radicado en Republica Dominican
 
     - moneda: Debe ser EXACTAMENTE uno de estos valores (respeta las mayusculas/minusculas tal cual):
     Peso dominicano
-    Dólares
+    Dólar americano
     Euros
     Si no se especifica, asume "Peso dominicano".
 
@@ -442,7 +391,11 @@ SYSTEM_PROMPT = """Tu eres un contador educado y radicado en Republica Dominican
 
     1. Si usa RNC, Confirmar RNC (DEBE TENER 9 CARACTERES) – PERSONA JURIDICA
     2. Si es cedula, Confirmar CEDULA (DEBE TENER 11 CARACTERES) – PERSONA FISICA
-    3. NCF (E31- DEBEN TENER 13 DIGITOS Y LOS B0(numero entero) - DEBEN TENER 11)Validar con extra cuidado.
+    3. NCF — CRITICO: valida el largo caracter por caracter antes de devolver.
+       - Serie E31: EXACTAMENTE 13 caracteres totales. Ni 12 ni 14.
+       - Serie B0x (B01–B09): EXACTAMENTE 11 caracteres totales. Ni 10 ni 12.
+       - Si el largo es incorrecto O si tuviste cualquier duda al leer uno de los digitos, DEBES agregar "ncf" a campos_dudosos.
+       - Error tipico a evitar: insertar un cero de mas en una secuencia de ceros consecutivos (ej. leer "E310000063883" en lugar de "E310000638833").
 
     **Revisar bien la foto por estos valores**  
     4. MONTO: puede aparecer en campos como total, sub-total, Total (sin itbis), Neto, Sub-total excento, etc.
@@ -538,8 +491,8 @@ def _normalize_catalog_value(value: str, options: list[str]) -> str:
 
 def _normalize_moneda(value) -> str:
     """
-    Return the canonical "Moneda" value: "Peso dominicano", "Dólares" or
-    "Euros" - capitalized (first letter only, casing otherwise preserved),
+    Return the canonical "Moneda" value: "Peso dominicano", "Dólar americano"
+    or "Euros" - capitalized (first letter only, casing otherwise preserved),
     never all-caps ISO codes like "DOP"/"USD"/"EUR". Defaults to "Peso
     dominicano" when unspecified, per the extraction prompt's own default.
     """
@@ -575,6 +528,22 @@ def _normalize_ncf(value) -> str:
     target columns are respected when writing Excel.
     """
     return re.sub(r"\s+", "", str(value or "")).upper()
+
+
+# Expected exact lengths by NCF series prefix (DGII standard).
+# E31 → 13 chars total; B0x (B01–B09) → 11 chars total.
+_NCF_EXPECTED_LENGTHS: dict[str, int] = {
+    "E31": 13,
+    **{f"B0{i}": 11 for i in range(1, 10)},
+}
+
+
+def _ncf_expected_length(ncf: str) -> Optional[int]:
+    """Return the canonical character length for a known NCF series, or None."""
+    for prefix, length in _NCF_EXPECTED_LENGTHS.items():
+        if ncf.startswith(prefix):
+            return length
+    return None
 
 
 def _normalize_ncf_afectado(value, ncf: str = "") -> str:
@@ -721,7 +690,7 @@ def _match_catalog_label(label: str, catalog: list[dict]) -> Tuple[str, Optional
     return text, None
 
 
-def _build_catalog_prompt_block(
+def _build_gastos_catalog_prompt_block(
     concepto_catalog: list[dict],
     tipo_de_pago_catalog: list[dict],
     concepto_document_comment: str = "",
@@ -793,7 +762,7 @@ def _build_catalog_prompt_block(
     )
 
 
-def _build_business_rules_prompt_block(business_rules: list[dict]) -> str:
+def _build_gastos_business_rules_prompt_block(business_rules: list[dict]) -> str:
     """
     Build the optional, per-client "business rules" portion of the
     extraction prompt: free-form context (exceptions, conventions,
@@ -824,13 +793,13 @@ def _build_business_rules_prompt_block(business_rules: list[dict]) -> str:
     )
 
 
-def _build_tipo_de_gasto_context_block(
+def _build_gastos_tipo_de_gasto_context_block(
     context: list[dict], document_comment: str = ""
 ) -> str:
     """
     Build optional, per-client context to help the AI choose among the
     FIXED tipo_de_gasto options (TIPO_DE_GASTO_OPTIONS, baked into
-    SYSTEM_PROMPT) - typically a client_documents container the user picked
+    GASTOS_SYSTEM_PROMPT) - typically a client_documents container the user picked
     specifically to describe how THIS client's suppliers/categories map to
     those 11 fixed options. This block NEVER introduces new tipo_de_gasto
     values; it only guides which of the existing 11 fits best. Returns ""
@@ -870,11 +839,13 @@ def _build_tipo_de_gasto_context_block(
 
 # Field names the LLM is allowed to flag in "campos_dudosos". Anything else
 # it returns (typos, business-logic fields, etc.) is dropped defensively.
+# "concepto_id" is not flagged by the LLM (it resolves the label post-extraction)
+# but is injected by _normalize_gastos_extracted when no catalog match is found.
 CAMPOS_DUDOSOS_VALID_KEYS = {
     "nombre", "documento", "ncf", "ncf_afectado", "tipo_de_suplidor",
     "tipo_de_gasto", "descripcion", "fecha", "monto_en_servicios",
     "monto_en_bienes", "itbis", "selectivo", "descuento", "propina",
-    "moneda", "metodo_de_pago",
+    "moneda", "metodo_de_pago", "concepto_id",
 }
 
 
@@ -898,7 +869,7 @@ def _score_from_campos_dudosos(campos_dudosos: list[str]) -> int:
     """
     Deterministic score derived from how many fields the LLM flagged as
     uncertain due to image quality: 0 -> 3, 1 -> 2, 2+ -> 1. Mirrors the
-    scoring rule described in SYSTEM_PROMPT, but enforced in code so the
+    scoring rule described in GASTOS_SYSTEM_PROMPT, but enforced in code so the
     model can't self-report a confident score (e.g. 3) while separately
     admitting a field is ambiguous.
     """
@@ -910,7 +881,7 @@ def _score_from_campos_dudosos(campos_dudosos: list[str]) -> int:
     return 1
 
 
-def prepare_export_row(data: dict) -> dict:
+def prepare_gastos_export_row(data: dict) -> dict:
     """
     Normalize a receipt dict to Carga Masiva template rules before writing Excel.
     Safe to call on both freshly extracted and user-edited payloads.
@@ -918,6 +889,31 @@ def prepare_export_row(data: dict) -> dict:
     ncf = _normalize_ncf(data.get("ncf", ""))
     nombre = str(data.get("nombre", "") or "").strip()[:255]
     descripcion = str(data.get("descripcion", "") or "").strip()[:200]
+
+    # Server-side NCF length validation.
+    # Any mismatch (too long OR too short) means the AI likely mis-read a digit
+    # or inserted/dropped a zero in a run of consecutive zeros.
+    # - Over-length: truncate to cap so the template column never exceeds the
+    #   DGII limit (even though the value may still be wrong after truncation).
+    # - Under-length: leave as-is; we cannot know which digit is missing.
+    # Either way: flag "ncf" in campos_dudosos so the score drops and the user
+    # is prompted to review the field manually.
+    server_dubious: list[str] = []
+    expected_ncf_len = _ncf_expected_length(ncf)
+    if expected_ncf_len and len(ncf) != expected_ncf_len:
+        if len(ncf) > expected_ncf_len:
+            print(
+                f"[WARNING] NCF '{ncf}' is {len(ncf)} chars (expected "
+                f"{expected_ncf_len}); truncating to cap and flagging as dubious."
+            )
+            ncf = ncf[:expected_ncf_len]
+        else:
+            print(
+                f"[WARNING] NCF '{ncf}' is only {len(ncf)} chars (expected "
+                f"{expected_ncf_len}); flagging as dubious."
+            )
+        server_dubious.append("ncf")
+
     ncf_afectado = _normalize_ncf_afectado(data.get("ncf_afectado", ""), ncf)
 
     if (
@@ -929,6 +925,11 @@ def prepare_export_row(data: dict) -> dict:
         )
 
     campos_dudosos = _normalize_campos_dudosos(data.get("campos_dudosos"))
+    # Merge server-side findings (e.g. over-length NCF) that the model missed.
+    for field in server_dubious:
+        if field not in campos_dudosos:
+            campos_dudosos.append(field)
+
     reported_score = _to_int_or_none(data.get("score")) or 0
     if reported_score > 0:
         # Cap (never raise) the model's self-reported score using the
@@ -968,12 +969,12 @@ def prepare_export_row(data: dict) -> dict:
     }
 
 
-def _normalize_for_key(value) -> str:
-    """Collapse whitespace and lowercase, for building duplicate-detection keys."""
+def _normalize_gastos_for_key(value) -> str:
+    """Collapse whitespace and lowercase, for building gastos duplicate-detection keys."""
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
-def _receipt_identity_key(data: dict) -> Optional[str]:
+def _gastos_receipt_identity_key(data: dict) -> Optional[str]:
     """
     Build a signature identifying the underlying receipt/invoice represented
     by an extracted-data dict, so the SAME receipt scanned/uploaded more than
@@ -990,11 +991,11 @@ def _receipt_identity_key(data: dict) -> Optional[str]:
       duplication (e.g. an almost-empty/failed extraction) - under-detecting
       is preferable to wrongly collapsing two unrelated blank results.
     """
-    prepared = prepare_export_row(data)
-    documento = _normalize_for_key(prepared.get("documento"))
-    ncf = _normalize_for_key(prepared.get("ncf"))
-    nombre = _normalize_for_key(prepared.get("nombre"))
-    fecha = _normalize_for_key(prepared.get("fecha"))
+    prepared = prepare_gastos_export_row(data)
+    documento = _normalize_gastos_for_key(prepared.get("documento"))
+    ncf = _normalize_gastos_for_key(prepared.get("ncf"))
+    nombre = _normalize_gastos_for_key(prepared.get("nombre"))
+    fecha = _normalize_gastos_for_key(prepared.get("fecha"))
     supplier = documento or nombre
 
     if ncf and supplier:
@@ -1013,7 +1014,7 @@ def _receipt_identity_key(data: dict) -> Optional[str]:
 
 # Template header aliases (headers are matched lowercased + stripped).
 # Note: the official template misspells "Decripcion" and trailing-spaces some headers.
-EXCEL_FIELD_MAPPINGS = {
+GASTOS_EXCEL_FIELD_MAPPINGS = {
     "nombre": ["nombre", "nombre del proveedor", "nombre del suplidor", "proveedor", "suplidor"],
     "documento": ["documento", "rnc", "nif", "ruc"],
     "ncf": ["ncf", "comprobante fiscal"],
@@ -1026,7 +1027,7 @@ EXCEL_FIELD_MAPPINGS = {
     "monto_en_bienes": ["monto en bienes", "monto bienes"],
     # The template only exposes 5 generic tax slots (Impuesto 1..5). WHICH
     # semantic amount (itbis/selectivo/descuento/propina) lands in which slot
-    # is decided per-client by TAX_COLUMN_FIELDS / resolve_tax_columns below,
+    # is decided per-client by GASTOS_TAX_COLUMN_FIELDS / resolve_gastos_tax_columns below,
     # so these keys (not "itbis"/"selectivo" directly) own the header aliases.
     "impuesto_1": ["impuesto 1"],
     "impuesto_2": ["impuesto 2"],
@@ -1039,35 +1040,35 @@ EXCEL_FIELD_MAPPINGS = {
     "tipo_de_pago_id": ["tipo de pago id", "tipo pago id"],
 }
 
-EXCEL_TEXT_FIELDS = [
+GASTOS_EXCEL_TEXT_FIELDS = [
     "nombre", "documento", "ncf", "ncf_afectado", "tipo_de_suplidor", "tipo_de_gasto",
     "descripcion", "moneda", "metodo_de_pago",
 ]
-EXCEL_NUMERIC_FIELDS = [
+GASTOS_EXCEL_NUMERIC_FIELDS = [
     "monto_en_servicios", "monto_en_bienes",
     "impuesto_1", "impuesto_2", "impuesto_3", "impuesto_4", "impuesto_5",
 ]
-EXCEL_INT_FIELDS = ["concepto_id", "tipo_de_pago_id"]
+GASTOS_EXCEL_INT_FIELDS = ["concepto_id", "tipo_de_pago_id"]
 
-# Amounts that can be routed into one of the 5 "Impuesto" export columns.
-# Matches composables/useClientTaxColumnMapping.ts's TAX_COLUMN_FIELDS.
-TAX_COLUMN_FIELDS = ["itbis", "selectivo", "descuento", "propina"]
+    # Amounts that can be routed into one of the 5 "Impuesto" export columns.
+    # Matches composables/useClientTaxColumnMapping.ts's GASTOS_TAX_COLUMN_FIELDS.
+GASTOS_TAX_COLUMN_FIELDS = ["itbis", "selectivo", "descuento", "propina"]
 # Fallback used when the client has no configured mapping yet, preserving
 # the export's original (pre-Descuento/Propina) behavior.
-DEFAULT_TAX_COLUMN_MAPPING = {"itbis": 1, "selectivo": 2, "descuento": None, "propina": None}
+GASTOS_DEFAULT_TAX_COLUMN_MAPPING = {"itbis": 1, "selectivo": 2, "descuento": None, "propina": None}
 
 
-def _clean_tax_column_mapping(mapping: Optional[dict]) -> dict:
+def _clean_gastos_tax_column_mapping(mapping: Optional[dict]) -> dict:
     """
     Normalize a client's {field: impuesto_slot} mapping. Unknown fields are
     dropped, out-of-range/duplicate slots fall back to "unmapped" (None) for
     that field so a bad client config never silently overwrites another
     field's column, and any field missing from `mapping` keeps its default.
     """
-    resolved = dict(DEFAULT_TAX_COLUMN_MAPPING)
+    resolved = dict(GASTOS_DEFAULT_TAX_COLUMN_MAPPING)
     if isinstance(mapping, dict):
         seen_slots: set[int] = set()
-        for field in TAX_COLUMN_FIELDS:
+        for field in GASTOS_TAX_COLUMN_FIELDS:
             if field not in mapping:
                 continue
             slot = _to_int_or_none(mapping.get(field))
@@ -1079,16 +1080,16 @@ def _clean_tax_column_mapping(mapping: Optional[dict]) -> dict:
     return resolved
 
 
-def resolve_tax_columns(row: dict, tax_column_mapping: Optional[dict]) -> dict:
+def resolve_gastos_tax_columns(row: dict, tax_column_mapping: Optional[dict]) -> dict:
     """
-    Given a prepare_export_row()-shaped dict (with itbis/selectivo/descuento/
+    Given a prepare_gastos_export_row()-shaped dict (with itbis/selectivo/descuento/
     propina already normalized to floats), return {impuesto_1..impuesto_5:
     float} placing each amount in the client-configured slot. Slots with no
     field mapped to them default to 0.0.
     """
-    mapping = _clean_tax_column_mapping(tax_column_mapping)
+    mapping = _clean_gastos_tax_column_mapping(tax_column_mapping)
     slots = {f"impuesto_{n}": 0.0 for n in range(1, 6)}
-    for field in TAX_COLUMN_FIELDS:
+    for field in GASTOS_TAX_COLUMN_FIELDS:
         slot = mapping.get(field)
         if slot:
             slots[f"impuesto_{slot}"] = _num(row.get(field))
@@ -1096,21 +1097,9 @@ def resolve_tax_columns(row: dict, tax_column_mapping: Optional[dict]) -> dict:
 # The template's Fecha column is formatted as a real Excel date (not text);
 # the destination CRM validates it as a date type, so it must be written as
 # an actual date serial, not a "DD/MM/YYYY" string.
-EXCEL_DATE_FIELDS = ["fecha"]
+GASTOS_EXCEL_DATE_FIELDS = ["fecha"]
 
-def _strip_markdown_fences(text: str) -> str:
-    """Remove ```json ... ``` fences that Gemini sometimes adds."""
-    text = text.strip()
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    return text.strip()
-
-
-def _normalize_extracted(
+def _normalize_gastos_extracted(
     extracted: dict,
     filename: str,
     concepto_catalog: Optional[list[dict]] = None,
@@ -1141,8 +1130,20 @@ def _normalize_extracted(
     if tipo_de_pago_id is None and tipo_de_pago_catalog:
         tipo_de_pago_id = tipo_de_pago_catalog[0]["document_id"]
 
-    prepared = prepare_export_row({
+    # Concepto is mandatory when the client has a catalog configured.
+    # If no match was found, flag it so the score drops and the cell is
+    # highlighted for manual review in the frontend.
+    extra_dudosos = list(extracted.get("campos_dudosos") or [])
+    if concepto_catalog and concepto_id is None and "concepto_id" not in extra_dudosos:
+        print(
+            f"[WARNING] '{filename}': concepto catalog present but no match found "
+            f"for '{extracted.get('concepto', '')}'; flagging concepto_id as dubious."
+        )
+        extra_dudosos.append("concepto_id")
+
+    prepared = prepare_gastos_export_row({
         **extracted,
+        "campos_dudosos": extra_dudosos,
         "concepto_id": concepto_id,
         "tipo_de_pago_id": tipo_de_pago_id,
         "filename": filename,
@@ -1151,131 +1152,21 @@ def _normalize_extracted(
     return prepared
 
 
-def _empty_extracted(filename: str, descripcion: str = "") -> dict:
+def _empty_gastos_extracted(filename: str, descripcion: str = "") -> dict:
     """Return an empty/default extracted-data dict for failed processing."""
-    return prepare_export_row({
+    return prepare_gastos_export_row({
         "descripcion": descripcion,
         "filename": filename,
         "score": 0,
     })
 
 
-def _is_retryable_error(error: Exception) -> bool:
-    error_str = str(error).lower()
-    return (
-        "429" in error_str or "rate" in error_str or "limit" in error_str
-        or "quota" in error_str or "resource" in error_str
-        or "500" in error_str or "502" in error_str or "503" in error_str
-        or "timeout" in error_str or "empty response" in error_str
-    )
+# _is_retryable_error, PDF_MAX_PAGES, PDF_RENDER_DPI, render_pdf_to_images,
+# load_file_as_images, _strip_markdown_fences, and gemini_semaphore are
+# imported from shared_utils at the top of this file.
 
 
-# Maximum number of pages to render from a single PDF. Receipts are almost
-# always 1-2 pages; the cap keeps payloads small and within model context.
-PDF_MAX_PAGES = 5
-# Rasterization DPI for PDF pages. ~150 DPI is a good balance between OCR
-# quality and payload size for invoice text.
-PDF_RENDER_DPI = 150
-
-
-def render_pdf_to_images(pdf_bytes: bytes, max_pages: int = PDF_MAX_PAGES) -> list:
-    """
-    Render a PDF byte buffer to a list of PIL.Image pages.
-
-    Uses PyMuPDF (imports as `pymupdf` on recent versions, `fitz` historically).
-    Returns at most `max_pages` images. Returns an empty list if PyMuPDF is
-    unavailable or the PDF can't be opened.
-    """
-    import io
-    from PIL import Image
-
-    try:
-        try:
-            import pymupdf  # PyMuPDF >= 1.24
-        except ImportError:  # pragma: no cover - older PyMuPDF
-            import fitz as pymupdf  # type: ignore
-
-        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-    except Exception as e:
-        print(f"[ERROR] [PDF] Could not open PDF ({len(pdf_bytes)} bytes): {e}")
-        return []
-
-    images: list = []
-    try:
-        page_count = min(doc.page_count, max_pages)
-        print(
-            f"[DEBUG] [PDF] Opened PDF: {doc.page_count} page(s) total, "
-            f"rasterizing {page_count} (max_pages={max_pages})"
-        )
-        zoom = PDF_RENDER_DPI / 72.0  # 72 is PDF's base DPI
-        matrix = pymupdf.Matrix(zoom, zoom)
-        for page_index in range(page_count):
-            page = doc.load_page(page_index)
-            pix = page.get_pixmap(matrix=matrix, alpha=False)
-            png_bytes = pix.tobytes("png")
-            img = Image.open(io.BytesIO(png_bytes))
-            images.append(img)
-            print(
-                f"[DEBUG] [PDF] Rendered page {page_index + 1}/{page_count}: "
-                f"{img.size[0]}x{img.size[1]}px, {len(png_bytes)} bytes"
-            )
-            if len(png_bytes) < 3000:
-                print(
-                    f"[WARNING] [PDF] Page {page_index + 1} rendered suspiciously "
-                    f"small ({len(png_bytes)} bytes) - it may be blank."
-                )
-    except Exception as e:
-        print(f"[ERROR] [PDF] Failed while rasterizing PDF: {e}")
-    finally:
-        try:
-            doc.close()
-        except Exception:
-            pass
-
-    return images
-
-
-def load_file_as_images(file_content: bytes, filename: str) -> list:
-    """
-    Load a single uploaded file into a list of PIL.Image objects ready for
-    a vision model.
-
-    - PNG / JPG / JPEG -> single-element list with the decoded image
-    - PDF              -> one image per rendered page (capped at PDF_MAX_PAGES)
-    - Anything else    -> empty list (caller treats as unsupported)
-    """
-    import io
-    from PIL import Image
-
-    ext = Path(filename).suffix.lower() if filename else ""
-    print(
-        f"[DEBUG] [LOAD] {filename}: {len(file_content)} bytes, "
-        f"detected extension '{ext}'"
-    )
-    if ext in (".png", ".jpg", ".jpeg"):
-        try:
-            img = Image.open(io.BytesIO(file_content))
-            img.load()  # force-decode now so corrupt/truncated images fail here
-            print(
-                f"[DEBUG] [LOAD] {filename}: decoded image "
-                f"{img.size[0]}x{img.size[1]}px, mode={img.mode}"
-            )
-            if len(file_content) < 3000:
-                print(
-                    f"[WARNING] [LOAD] {filename} is suspiciously small "
-                    f"({len(file_content)} bytes) - it may be blank/corrupt."
-                )
-            return [img]
-        except Exception as e:
-            print(f"[ERROR] [LOAD] Failed to open image {filename}: {e}")
-            return []
-    if ext == ".pdf":
-        return render_pdf_to_images(file_content)
-    print(f"[WARNING] [LOAD] {filename}: unsupported extension '{ext}'")
-    return []
-
-
-def process_with_gemini(
+def process_gastos_with_gemini(
     file_content: bytes,
     filename: str,
     max_retries: int = 3,
@@ -1317,13 +1208,13 @@ def process_with_gemini(
     import time
     import re
 
-    catalog_block = _build_catalog_prompt_block(
+    catalog_block = _build_gastos_catalog_prompt_block(
         concepto_catalog or [], tipo_de_pago_catalog or [],
         concepto_document_comment=concepto_document_comment,
         tipo_de_pago_document_comment=tipo_de_pago_document_comment,
     )
-    catalog_block += _build_business_rules_prompt_block(business_rules or [])
-    catalog_block += _build_tipo_de_gasto_context_block(
+    catalog_block += _build_gastos_business_rules_prompt_block(business_rules or [])
+    catalog_block += _build_gastos_tipo_de_gasto_context_block(
         tipo_de_gasto_context or [], document_comment=tipo_de_gasto_document_comment
     )
 
@@ -1335,12 +1226,12 @@ def process_with_gemini(
     # Check if API key is configured
     if not GEMINI_API_KEY:
         print(f"[ERROR] [GEMINI-SINGLE] Cannot process {filename}: GEMINI_API_KEY not configured")
-        return _empty_extracted(filename, descripcion="ERROR: API key not configured")
+        return _empty_gastos_extracted(filename, descripcion="ERROR: API key not configured")
 
     file_extension = Path(filename).suffix.lower() if filename else ""
     if file_extension not in (".png", ".jpg", ".jpeg", ".pdf"):
         print(f"[ERROR] [GEMINI-SINGLE] Unsupported file type: {file_extension}")
-        return _empty_extracted(
+        return _empty_gastos_extracted(
             filename, descripcion=f"Unsupported file type: {file_extension}"
         )
 
@@ -1348,7 +1239,7 @@ def process_with_gemini(
     print(f"[DEBUG] [GEMINI-SINGLE] '{filename}': loaded {len(page_images)} page image(s)")
     if not page_images:
         print(f"[ERROR] [GEMINI-SINGLE] '{filename}': no page images produced, aborting before calling Gemini")
-        return _empty_extracted(
+        return _empty_gastos_extracted(
             filename,
             descripcion=(
                 "Could not render PDF pages"
@@ -1359,7 +1250,7 @@ def process_with_gemini(
 
     if file_extension == ".pdf" and len(page_images) > 1:
         prompt = (
-            f"{SYSTEM_PROMPT}{catalog_block}\n\n"
+            f"{GASTOS_SYSTEM_PROMPT}{catalog_block}\n\n"
             f"NOTA: Te envio {len(page_images)} paginas de un mismo recibo/"
             f"factura en PDF. Trata las paginas como un solo documento y "
             f"retorna SOLO un objeto JSON valido sin texto adicional, sin "
@@ -1367,7 +1258,7 @@ def process_with_gemini(
         )
     else:
         prompt = (
-            f"{SYSTEM_PROMPT}{catalog_block}\n\nExtrae la informacion del "
+            f"{GASTOS_SYSTEM_PROMPT}{catalog_block}\n\nExtrae la informacion del "
             f"recibo/factura en la imagen y retorna SOLO un objeto JSON "
             f"valido sin texto adicional, sin markdown, sin explicaciones."
         )
@@ -1406,7 +1297,7 @@ def process_with_gemini(
                 else:
                     raise ValueError("Could not parse JSON from response")
 
-            normalized = _normalize_extracted(
+            normalized = _normalize_gastos_extracted(
                 extracted_data, filename,
                 concepto_catalog=concepto_catalog,
                 tipo_de_pago_catalog=tipo_de_pago_catalog,
@@ -1441,10 +1332,10 @@ def process_with_gemini(
                 break
 
     print(f"[ERROR] [GEMINI-SINGLE] Gemini processing failed for {filename}: {last_error}")
-    return _empty_extracted(filename)
+    return _empty_gastos_extracted(filename)
 
 
-def process_batch_with_gemini(
+def process_gastos_batch_with_gemini(
     files: List[Tuple[bytes, str]],
     max_retries: int = 3,
     concepto_catalog: Optional[list[dict]] = None,
@@ -1497,7 +1388,7 @@ def process_batch_with_gemini(
 
     if not GEMINI_API_KEY:
         print("[ERROR] [GEMINI-BATCH] Cannot process batch: GEMINI_API_KEY not configured")
-        return [_empty_extracted(fn, descripcion="ERROR: API key not configured")
+        return [_empty_gastos_extracted(fn, descripcion="ERROR: API key not configured")
                 for _, fn in files]
 
     # Render each file to its page-image list up front so we can fail fast on
@@ -1527,13 +1418,13 @@ def process_batch_with_gemini(
             f"  - Documento #{i}: {filename} ({len(pages)} pagina(s))"
         )
 
-    catalog_block = _build_catalog_prompt_block(
+    catalog_block = _build_gastos_catalog_prompt_block(
         concepto_catalog or [], tipo_de_pago_catalog or [],
         concepto_document_comment=concepto_document_comment,
         tipo_de_pago_document_comment=tipo_de_pago_document_comment,
     )
-    catalog_block += _build_business_rules_prompt_block(business_rules or [])
-    catalog_block += _build_tipo_de_gasto_context_block(
+    catalog_block += _build_gastos_business_rules_prompt_block(business_rules or [])
+    catalog_block += _build_gastos_tipo_de_gasto_context_block(
         tipo_de_gasto_context or [], document_comment=tipo_de_gasto_document_comment
     )
     batch_keys = (
@@ -1547,7 +1438,7 @@ def process_batch_with_gemini(
         batch_keys += ", tipo_de_pago_erp"
 
     batch_prompt = (
-        f"{SYSTEM_PROMPT}{catalog_block}\n\n"
+        f"{GASTOS_SYSTEM_PROMPT}{catalog_block}\n\n"
         f"IMPORTANTE - Procesamiento por lotes: Te voy a enviar {len(files)} "
         f"documentos de recibos/facturas. Algunos pueden ser PDFs con varias "
         f"paginas; trata cada documento como UNA unidad y retorna UN solo "
@@ -1631,7 +1522,7 @@ def process_batch_with_gemini(
             results: List[dict] = []
             for i, (_, filename) in enumerate(files):
                 if i < len(parsed) and isinstance(parsed[i], dict):
-                    normalized = _normalize_extracted(
+                    normalized = _normalize_gastos_extracted(
                         parsed[i], filename,
                         concepto_catalog=concepto_catalog,
                         tipo_de_pago_catalog=tipo_de_pago_catalog,
@@ -1653,7 +1544,7 @@ def process_batch_with_gemini(
                         f"[ERROR] [GEMINI-BATCH] '{filename}': no matching entry "
                         f"at index {i} in Gemini's response array, using empty result"
                     )
-                    results.append(_empty_extracted(filename))
+                    results.append(_empty_gastos_extracted(filename))
             print(f"[INFO] [GEMINI-BATCH] Batch completed: {len(results)} result(s)")
             return results
 
@@ -1673,7 +1564,7 @@ def process_batch_with_gemini(
     # Fall back to per-file processing so a single bad image doesn't fail the whole batch.
     print(f"[INFO] [GEMINI-BATCH] Falling back to per-file processing for {len(files)} files")
     return [
-        process_with_gemini(
+        process_gastos_with_gemini(
             content, filename,
             concepto_catalog=concepto_catalog,
             tipo_de_pago_catalog=tipo_de_pago_catalog,
@@ -1687,41 +1578,41 @@ def process_batch_with_gemini(
     ]
 
 
-def _fill_template_xls(rows: list, tax_column_mapping: Optional[dict] = None) -> Path:
+def _fill_gastos_template_xls(rows: list, tax_column_mapping: Optional[dict] = None) -> Path:
     """
-    Write OUTPUT_XLS by filling the official Carga Masiva template with the
-    given (already normalized) receipt rows. The template's dropdowns, named
+    Write GASTOS_OUTPUT_XLS by filling the official Carga Masiva template with
+    the given (already normalized) receipt rows. The template's dropdowns, named
     ranges and Nomencladores sheet are preserved verbatim (see xls_template).
 
     tax_column_mapping: optional per-client {itbis|selectivo|descuento|
     propina: 1..5} (see composables/useClientTaxColumnMapping.ts) deciding
     which "Impuesto N" column each amount is written into. Falls back to
-    DEFAULT_TAX_COLUMN_MAPPING (itbis -> Impuesto 1, selectivo -> Impuesto 2)
+    GASTOS_DEFAULT_TAX_COLUMN_MAPPING (itbis -> Impuesto 1, selectivo -> Impuesto 2)
     when not provided, matching the export's original behavior.
     """
-    if not TEMPLATE_XLS_SOURCE.exists():
-        raise FileNotFoundError(f"Template file not found: {TEMPLATE_XLS_SOURCE}")
+    if not GASTOS_TEMPLATE_XLS_SOURCE.exists():
+        raise FileNotFoundError(f"Template file not found: {GASTOS_TEMPLATE_XLS_SOURCE}")
     prepared = []
     for r in rows:
-        row = prepare_export_row(r)
-        row.update(resolve_tax_columns(row, tax_column_mapping))
+        row = prepare_gastos_export_row(r)
+        row.update(resolve_gastos_tax_columns(row, tax_column_mapping))
         prepared.append(row)
-    return fill_xls_template(
-        TEMPLATE_XLS_SOURCE,
-        OUTPUT_XLS,
+    return fill_gastos_xls_template(
+        GASTOS_TEMPLATE_XLS_SOURCE,
+        GASTOS_OUTPUT_XLS,
         prepared,
-        EXCEL_FIELD_MAPPINGS,
-        EXCEL_TEXT_FIELDS,
-        EXCEL_NUMERIC_FIELDS,
-        EXCEL_INT_FIELDS,
-        date_fields=EXCEL_DATE_FIELDS,
+        GASTOS_EXCEL_FIELD_MAPPINGS,
+        GASTOS_EXCEL_TEXT_FIELDS,
+        GASTOS_EXCEL_NUMERIC_FIELDS,
+        GASTOS_EXCEL_INT_FIELDS,
+        date_fields=GASTOS_EXCEL_DATE_FIELDS,
     )
 
 
-def populate_excel_template(data: dict, tax_column_mapping: Optional[dict] = None):
-    """Fill the template with a single extracted receipt (fresh export)."""
+def populate_gastos_excel_template(data: dict, tax_column_mapping: Optional[dict] = None):
+    """Fill the gastos template with a single extracted receipt (fresh export)."""
     try:
-        return _fill_template_xls([data], tax_column_mapping=tax_column_mapping)
+        return _fill_gastos_template_xls([data], tax_column_mapping=tax_column_mapping)
     except Exception as e:
         print(f"[ERROR] Excel processing failed: {e}")
         raise
@@ -1859,7 +1750,7 @@ async def upload_file(
         # Process with Gemini (rate limited to 5 concurrent)
         async with gemini_semaphore:
             extracted_data = await asyncio.to_thread(
-                process_with_gemini, file_content, file.filename,
+                process_gastos_with_gemini, file_content, file.filename,
                 concepto_catalog=concepto_list,
                 tipo_de_pago_catalog=tipo_de_pago_list,
                 concepto_document_comment=concepto_comment,
@@ -1871,7 +1762,7 @@ async def upload_file(
         
         print(f"[INFO] [/upload] '{file.filename}' processed, score={extracted_data.get('score')}")
 
-        populate_excel_template(extracted_data, tax_column_mapping=tax_column_mapping_dict)
+        populate_gastos_excel_template(extracted_data, tax_column_mapping=tax_column_mapping_dict)
         
         # Save to history
         history = load_history()
@@ -2068,7 +1959,7 @@ async def upload_batch(
         # Reuse the same semaphore to coordinate concurrency with single uploads.
         async with gemini_semaphore:
             extracted_results = await asyncio.to_thread(
-                process_batch_with_gemini, batch_inputs,
+                process_gastos_batch_with_gemini, batch_inputs,
                 concepto_catalog=concepto_list,
                 tipo_de_pago_catalog=tipo_de_pago_list,
                 concepto_document_comment=concepto_comment,
@@ -2087,7 +1978,7 @@ async def upload_batch(
             if extracted_idx < len(extracted_results):
                 data = extracted_results[extracted_idx]
             else:
-                data = _empty_extracted(entry["filename"])
+                data = _empty_gastos_extracted(entry["filename"])
             extracted_idx += 1
 
             # Duplicate check: different file bytes, but the extracted data
@@ -2095,7 +1986,7 @@ async def upload_batch(
             # counted - either earlier in this same batch or in a previous
             # session. Exclude it from the export/history so it isn't
             # double-counted, without failing the whole batch.
-            receipt_key = _receipt_identity_key(data)
+            receipt_key = _gastos_receipt_identity_key(data)
             if receipt_key and receipt_key in seen_keys:
                 duplicate_of = key_to_filename.get(receipt_key, "?")
                 print(
@@ -2118,7 +2009,7 @@ async def upload_batch(
                 key_to_filename[receipt_key] = entry["filename"]
 
             try:
-                populate_excel_template(data, tax_column_mapping=tax_column_mapping_dict)
+                populate_gastos_excel_template(data, tax_column_mapping=tax_column_mapping_dict)
             except Exception as e:
                 print(f"[ERROR] Excel populate failed for {entry['filename']}: {e}")
 
@@ -2160,14 +2051,14 @@ async def upload_batch(
     }
 
 
-def regenerate_excel_from_data(files_data: list, tax_column_mapping: Optional[dict] = None):
-    """Regenerate the export by filling the template with edited data.
+def regenerate_gastos_excel_from_data(files_data: list, tax_column_mapping: Optional[dict] = None):
+    """Regenerate the gastos export by filling the template with edited data.
 
     Score is excluded from export. The template is filled (not recreated) so
     its dropdowns / data validations remain intact for the destination system.
     """
     try:
-        return _fill_template_xls(files_data or [], tax_column_mapping=tax_column_mapping)
+        return _fill_gastos_template_xls(files_data or [], tax_column_mapping=tax_column_mapping)
     except Exception as e:
         print(f"[ERROR] Regenerating Excel failed: {e}")
         raise
@@ -2193,16 +2084,16 @@ async def download_excel_post(payload: Optional[Any] = Body(None)):
         tax_column_mapping = payload.get("tax_column_mapping")
 
     if files_data:
-        regenerate_excel_from_data(files_data, tax_column_mapping=tax_column_mapping)
+        regenerate_gastos_excel_from_data(files_data, tax_column_mapping=tax_column_mapping)
     
-    if not OUTPUT_XLS.exists():
-        if OUTPUT_FILE.exists():
-            convert_xlsx_to_xls(OUTPUT_FILE, OUTPUT_XLS)
+    if not GASTOS_OUTPUT_XLS.exists():
+        if GASTOS_OUTPUT_FILE.exists():
+            convert_xlsx_to_xls(GASTOS_OUTPUT_FILE, GASTOS_OUTPUT_XLS)
         else:
             raise HTTPException(status_code=404, detail="No processed file available")
     
     return FileResponse(
-        path=OUTPUT_XLS,
+        path=GASTOS_OUTPUT_XLS,
         filename="processed_receipts.xls",
         media_type="application/vnd.ms-excel",
     )
@@ -2211,248 +2102,24 @@ async def download_excel_post(payload: Optional[Any] = Body(None)):
 @app.get("/download")
 async def download_excel_get():
     """Download the processed Excel file as .xls."""
-    if not OUTPUT_XLS.exists():
-        if OUTPUT_FILE.exists():
-            convert_xlsx_to_xls(OUTPUT_FILE, OUTPUT_XLS)
+    if not GASTOS_OUTPUT_XLS.exists():
+        if GASTOS_OUTPUT_FILE.exists():
+            convert_xlsx_to_xls(GASTOS_OUTPUT_FILE, GASTOS_OUTPUT_XLS)
         else:
             raise HTTPException(status_code=404, detail="No processed file available")
     
     return FileResponse(
-        path=OUTPUT_XLS,
+        path=GASTOS_OUTPUT_XLS,
         filename="processed_receipts.xls",
         media_type="application/vnd.ms-excel",
     )
 
 
-TIPO_DE_FACTURA_OPTIONS_SUPLIDOR = ["Formal", "Informal", "Internacional", "Pagos al exterior"]
-# Pages per Gemini call for the suplidor scanner.
-SUPLIDOR_BATCH_SIZE = 5
-# Max PDF pages to scan (large docs may have hundreds of invoices).
-SUPLIDOR_MAX_PAGES = 500
-
-SUPLIDORES_BATCH_PROMPT = """Eres un contador experto radicado en República Dominicana. \
-Analiza TODAS las imágenes de facturas/recibos adjuntas y extrae TODOS los SUPLIDORES \
-(proveedores que emiten los documentos) únicos que encuentres.
-
-Para cada suplidor extrae:
-- nombre: nombre o razón social (máx. 255 caracteres).
-- documento: SOLO DÍGITOS del RNC / Cédula / Pasaporte, sin guiones ni espacios \
-  (ej: "101-70217-6" → "101702176"). Máximo 20 caracteres. Si no aparece, devuelve "".
-- tipo_de_factura: EXACTAMENTE uno de: Formal, Informal, Internacional, Pagos al exterior.
-  Regla: RNC + NCF formal → "Formal"; sin NCF formal → "Informal"; \
-  suplidor extranjero → "Internacional" o "Pagos al exterior".
-
-Devuelve un JSON con la clave "suplidores" que contenga un array:
-{"suplidores": [{"nombre": "...", "documento": "...", "tipo_de_factura": "..."}, ...]}
-Si no encuentras ningún suplidor, devuelve {"suplidores": []}.
-No incluyas texto fuera del JSON.
-"""
-
-
-def _get_tipo_documento(documento: str) -> str:
-    """Classify a cleaned documento string as RNC, CEDULA, or PASAPORTE."""
-    d = (documento or "").strip()
-    if not d:
-        return ""
-    if len(d) == 9 and d.isdigit():
-        return "RNC"
-    if len(d) == 11 and d.isdigit():
-        return "CEDULA"
-    return "PASAPORTE"
-
-
-def _extract_suplidores_from_batch(images: list, batch_num: int) -> list[dict]:
-    """
-    Send a batch of PIL images to Gemini and return a list of raw suplidor
-    dicts {nombre, documento, tipo_de_factura}.  Returns [] on any failure.
-    """
-    import time
-
-    model = genai.GenerativeModel(INDIVIDUAL_MODEL)
-    parts = [SUPLIDORES_BATCH_PROMPT] + images
-
-    for attempt in range(3):
-        try:
-            response = model.generate_content(
-                parts,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json",
-                    max_output_tokens=1024,
-                    temperature=0.1,
-                ),
-            )
-            raw = (response.text or "").strip()
-            if raw.startswith("```"):
-                raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw).rstrip("`").strip()
-            data = json.loads(raw)
-            rows = data.get("suplidores", [])
-            if not isinstance(rows, list):
-                rows = []
-            result = []
-            for row in rows:
-                nombre = str(row.get("nombre", "") or "").strip()[:255]
-                documento = re.sub(r"\D", "", str(row.get("documento", "") or ""))[:20]
-                tipo = str(row.get("tipo_de_factura", "") or "").strip()
-                if tipo not in TIPO_DE_FACTURA_OPTIONS_SUPLIDOR:
-                    tipo = ""
-                if nombre:
-                    result.append({"nombre": nombre, "documento": documento, "tipo_de_factura": tipo})
-            print(f"[DEBUG] [suplidor-batch-{batch_num}] found {len(result)} suplidores")
-            return result
-        except Exception as e:
-            print(f"[ERROR] [suplidor-batch-{batch_num}] attempt {attempt + 1}: {e}")
-            if attempt < 2:
-                time.sleep(2 ** attempt)
-    return []
-
-
-def extract_suplidores_from_file(file_content: bytes, filename: str) -> dict:
-    """
-    Render all pages of a PDF (or a single image) and process them in batches
-    through Gemini to extract every unique suplidor in the document.
-
-    Returns:
-        {
-            "page_count": int,
-            "suplidores": [
-                {
-                    "nombre": str,
-                    "documento": str,       # digits only, max 20
-                    "tipo_de_documento": str,  # RNC | CEDULA | PASAPORTE | ""
-                    "tipo_de_factura": str,
-                },
-                ...
-            ]
-        }
-    """
-    if not GEMINI_API_KEY:
-        return {"page_count": 0, "suplidores": []}
-
-    ext = Path(filename).suffix.lower() if filename else ""
-    if ext == ".pdf":
-        all_images = render_pdf_to_images(file_content, max_pages=SUPLIDOR_MAX_PAGES)
-    else:
-        from PIL import Image
-        import io
-        try:
-            img = Image.open(io.BytesIO(file_content))
-            img.load()
-            all_images = [img]
-        except Exception as e:
-            print(f"[ERROR] [scan-suplidores] Could not open image {filename}: {e}")
-            return {"page_count": 0, "suplidores": []}
-
-    page_count = len(all_images)
-    print(f"[INFO] [scan-suplidores] '{filename}': {page_count} page(s) to process")
-
-    if not all_images:
-        return {"page_count": 0, "suplidores": []}
-
-    # Process in batches and collect all raw rows
-    all_rows: list[dict] = []
-    for i in range(0, len(all_images), SUPLIDOR_BATCH_SIZE):
-        batch = all_images[i: i + SUPLIDOR_BATCH_SIZE]
-        batch_num = i // SUPLIDOR_BATCH_SIZE + 1
-        rows = _extract_suplidores_from_batch(batch, batch_num)
-        all_rows.extend(rows)
-
-    # Deduplicate: prefer the first occurrence of each (documento OR nombre) key
-    seen_docs: set[str] = set()
-    seen_names: set[str] = set()
-    unique: list[dict] = []
-    for row in all_rows:
-        doc_key = row["documento"].lower() if row["documento"] else ""
-        name_key = row["nombre"].lower()
-        if doc_key:
-            if doc_key in seen_docs:
-                continue
-            seen_docs.add(doc_key)
-        else:
-            if name_key in seen_names:
-                continue
-            seen_names.add(name_key)
-
-        unique.append({
-            "nombre": row["nombre"],
-            "documento": row["documento"],
-            "tipo_de_documento": _get_tipo_documento(row["documento"]),
-            "tipo_de_factura": row["tipo_de_factura"],
-        })
-
-    print(
-        f"[INFO] [scan-suplidores] '{filename}': {len(unique)} unique suplidor(s) "
-        f"from {page_count} page(s)"
-    )
-    return {"page_count": page_count, "suplidores": unique}
-
-
-@app.post("/scan-suplidores")
-async def scan_suplidores(file: UploadFile = File(...)):
-    """
-    Extract all unique suplidores from a PDF (all pages, batched) or image.
-
-    Returns:
-        {
-            "page_count": int,
-            "suplidores": [
-                {"nombre", "documento", "tipo_de_documento", "tipo_de_factura"},
-                ...
-            ]
-        }
-    """
-    allowed_extensions = {".pdf", ".png", ".jpg", ".jpeg"}
-    ext = Path(file.filename).suffix.lower() if file.filename else ""
-    if ext not in allowed_extensions:
-        raise HTTPException(
-            status_code=400,
-            detail="Unsupported file type. Supported: PDF, PNG, JPG, JPEG.",
-        )
-
-    file_content = await file.read()
-    print(
-        f"[INFO] [/scan-suplidores] Received '{file.filename}' ({len(file_content)} bytes)"
-    )
-
-    async with gemini_semaphore:
-        result = await asyncio.to_thread(
-            extract_suplidores_from_file, file_content, file.filename
-        )
-
-    return result
-
-
-@app.post("/download-suplidores-template")
-async def download_suplidores_template(suplidores: list = Body(...)):
-    """
-    Generate and return an Excel (.xlsx) with the platform's suplidor upload
-    format: Documento | Nombre | Tipo de Factura.
-    """
-    import io
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Suplidores"
-
-    headers = ["Documento", "Nombre", "Tipo de Factura"]
-    ws.append(headers)
-
-    for s in suplidores:
-        ws.append([
-            s.get("documento", ""),
-            s.get("nombre", ""),
-            s.get("tipo_de_factura", ""),
-        ])
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-
-    from fastapi.responses import StreamingResponse
-    return StreamingResponse(
-        buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=suplidores.xlsx"},
-    )
+# ---------------------------------------------------------------------------
+# Suplidores routes (scan + export) — defined in suplidores_server.py
+# ---------------------------------------------------------------------------
+from suplidores_server import router as suplidores_router  # noqa: E402
+app.include_router(suplidores_router)
 
 
 if __name__ == "__main__":

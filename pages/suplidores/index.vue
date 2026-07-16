@@ -142,6 +142,11 @@ function toggleAll() {
   fileRows.value.forEach((r) => (r.selected = val));
 }
 
+const isDragging = ref(false);
+let dragDepth = 0;
+
+const ACCEPTED_EXT = new Set(["pdf", "png", "jpg", "jpeg"]);
+
 function openFileDialog() {
   if (!selectedClientId.value) {
     scanError.value = "Selecciona un cliente antes de agregar archivos.";
@@ -150,14 +155,21 @@ function openFileDialog() {
   fileInput.value?.click();
 }
 
-async function onFilesSelected(e: Event) {
-  const input = e.target as HTMLInputElement;
-  const files = Array.from(input.files ?? []);
-  if (!files.length) return;
-  input.value = "";
+function addFiles(files: File[]) {
+  if (!selectedClientId.value) {
+    scanError.value = "Selecciona un cliente antes de agregar archivos.";
+    return;
+  }
+
+  const accepted = files.filter((f) => {
+    const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
+    return ACCEPTED_EXT.has(ext);
+  });
+  if (!accepted.length) return;
+
   scanError.value = null;
 
-  const newRows: FileRow[] = files.map((f) => ({
+  const newRows: FileRow[] = accepted.map((f) => ({
     id: crypto.randomUUID(),
     file: f,
     filename: f.name,
@@ -167,7 +179,6 @@ async function onFilesSelected(e: Event) {
   }));
   fileRows.value.push(...newRows);
 
-  // count pages async for each new row
   for (const row of newRows) {
     const ext = row.filename.split(".").pop()?.toLowerCase();
     if (ext === "pdf") {
@@ -179,6 +190,40 @@ async function onFilesSelected(e: Event) {
       row.pageCount = 1;
     }
   }
+}
+
+function onFilesSelected(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const files = Array.from(input.files ?? []);
+  input.value = "";
+  if (!files.length) return;
+  addFiles(files);
+}
+
+function onDragEnter(e: DragEvent) {
+  e.preventDefault();
+  dragDepth += 1;
+  isDragging.value = true;
+}
+
+function onDragLeave(e: DragEvent) {
+  e.preventDefault();
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) isDragging.value = false;
+}
+
+function onDragOver(e: DragEvent) {
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+}
+
+function onDrop(e: DragEvent) {
+  e.preventDefault();
+  dragDepth = 0;
+  isDragging.value = false;
+  const files = Array.from(e.dataTransfer?.files ?? []);
+  if (!files.length) return;
+  addFiles(files);
 }
 
 function removeRow(id: string) {
@@ -330,7 +375,22 @@ async function saveToDatabase() {
   }
 }
 
-// ── Download template ─────────────────────────────────────────────────────────
+// ── Download Carga Masiva template ────────────────────────────────────────────
+function buildSuplidoresFilename() {
+  const rawName = (selectedClient.value?.name || "cliente").trim() || "cliente";
+  const clientName = rawName
+    .replace(/[\\/:*?"<>|]+/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const stamp =
+    [pad(now.getDate()), pad(now.getMonth() + 1), now.getFullYear()].join("_") +
+    `_${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  return `${clientName || "cliente"}-carga_masiva_suplidores-${stamp}.xls`;
+}
+
 async function downloadTemplate() {
   // Exclude suppliers already registered in Citrus from the export template
   const toDownload = activeExtracted.value.filter(
@@ -338,7 +398,9 @@ async function downloadTemplate() {
   );
   if (!toDownload.length) return;
 
-  const res = await fetch(`${API_BASE}/download-suplidores-template`, {
+  // Fill the official Carga Masiva .xls (same approach as gastos):
+  // copy template-suplidores.xls and write rows into "Listado de Suplidores".
+  const res = await fetch(`${API_BASE}/download-suplidores-carga-masiva`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(
@@ -349,12 +411,15 @@ async function downloadTemplate() {
       })),
     ),
   });
-  if (!res.ok) return;
+  if (!res.ok) {
+    scanError.value = "No se pudo generar la plantilla de suplidores.";
+    return;
+  }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `suplidores-${selectedClient.value?.name ?? "export"}.xlsx`;
+  a.download = buildSuplidoresFilename();
   document.body.appendChild(a);
   a.click();
   URL.revokeObjectURL(url);
@@ -515,7 +580,15 @@ onMounted(async () => {
           </p>
 
           <!-- File queue table -->
-          <div v-if="fileRows.length > 0" class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+          <div
+            v-if="fileRows.length > 0"
+            class="overflow-hidden rounded-xl border border-gray-200 bg-white transition"
+            :class="isDragging ? 'border-emerald-400 ring-2 ring-emerald-200' : ''"
+            @drop="onDrop"
+            @dragover="onDragOver"
+            @dragenter="onDragEnter"
+            @dragleave="onDragLeave"
+          >
             <table class="w-full text-left text-sm">
               <thead class="border-b border-gray-100 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500">
                 <tr>
@@ -628,8 +701,15 @@ onMounted(async () => {
           <!-- Drop zone (no files yet) -->
           <div
             v-else
-            class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-200 bg-white px-6 py-12 text-center transition hover:border-emerald-400 hover:bg-emerald-50/30"
+            class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed bg-white px-6 py-12 text-center transition"
+            :class="isDragging
+              ? 'border-emerald-500 bg-emerald-50/50'
+              : 'border-gray-200 hover:border-emerald-400 hover:bg-emerald-50/30'"
             @click="openFileDialog"
+            @drop="onDrop"
+            @dragover="onDragOver"
+            @dragenter="onDragEnter"
+            @dragleave="onDragLeave"
           >
             <svg class="mb-3 h-10 w-10 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"

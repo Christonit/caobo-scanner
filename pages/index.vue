@@ -1,217 +1,134 @@
 <template>
-  <div class="min-h-screen px-8 py-8">
-    <div
-      class="mx-auto flex w-full gap-8"
-      :class="{
-        'max-w-6xl': files.length == 0,
-      }"
-    >
-      <!-- Main column -->
-      <div class="min-w-0 flex-1">
-        <!-- Header -->
-        <header class="mb-8 flex items-start justify-between gap-4">
+  <div
+    class="mx-auto flex w-full gap-8 px-8"
+    :class="{
+      'max-w-6xl': files.length == 0,
+    }"
+  >
+    <!-- Main column -->
+    <div class="min-w-0 flex-1">
+      <!-- Header -->
+      <header class="mb-8 flex items-start justify-between gap-4">
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight text-gray-900">
+            Extraer información
+          </h1>
+          <p class="mt-1 text-sm text-gray-500">
+            Sube documentos para extraer su información automáticamente. Soporta
+            PDF, PNG y JPG.
+          </p>
+        </div>
+        <a
+          href="https://github.com"
+          target="_blank"
+          rel="noopener"
+          class="hidden flex-shrink-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 sm:flex"
+        >
+          <svg
+            class="h-4 w-4 text-gray-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          Saber más
+        </a>
+      </header>
+
+      <!-- Client + ERP catalog selection (mandatory before scanning) -->
+      <section
+        class="mb-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+      >
+        <div class="mb-4 flex items-center justify-between gap-3">
           <div>
-            <h1 class="text-2xl font-bold tracking-tight text-gray-900">
-              Extraer información
-            </h1>
-            <p class="mt-1 text-sm text-gray-500">
-              Sube documentos para extraer su información automáticamente.
-              Soporta PDF, PNG y JPG.
+            <h2 class="text-base font-semibold text-gray-900">Cliente</h2>
+            <p class="mt-0.5 text-sm text-gray-500">
+              Selecciona el cliente y los documentos de ERP que se usarán para
+              clasificar Concepto Id y Tipo de Pago Id.
             </p>
           </div>
-          <a
-            href="https://github.com"
-            target="_blank"
-            rel="noopener"
-            class="hidden flex-shrink-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 sm:flex"
+          <span
+            v-if="canScan"
+            class="flex-shrink-0 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700"
           >
-            <svg
-              class="h-4 w-4 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-            Saber más
-          </a>
-        </header>
+            Listo para escanear
+          </span>
+          <span
+            v-else
+            class="flex-shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700"
+          >
+            Selección requerida
+          </span>
+        </div>
 
-        <!-- Client + ERP catalog selection (mandatory before scanning) -->
-        <section
-          class="mb-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+        <p
+          v-if="clientsError"
+          class="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
         >
-          <div class="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <h2 class="text-base font-semibold text-gray-900">Cliente</h2>
-              <p class="mt-0.5 text-sm text-gray-500">
-                Selecciona el cliente y los documentos de ERP que se usarán para
-                clasificar Concepto Id y Tipo de Pago Id.
-              </p>
-            </div>
-            <span
-              v-if="canScan"
-              class="flex-shrink-0 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700"
-            >
-              Listo para escanear
-            </span>
-            <span
-              v-else
-              class="flex-shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700"
-            >
-              Selección requerida
-            </span>
-          </div>
+          {{ clientsError }}
+        </p>
 
-          <p
-            v-if="clientsError"
-            class="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-          >
-            {{ clientsError }}
-          </p>
-
-          <div class="grid gap-4 sm:grid-cols-3">
-            <div>
-              <label
-                for="client-select"
-                class="mb-1.5 block text-sm font-medium text-gray-700"
-              >
-                Cliente <span class="text-rose-500">*</span>
-              </label>
-              <select
-                id="client-select"
-                v-model="selectedClientId"
-                @change="onClientChange"
-                :disabled="clientsLoading"
-                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
-              >
-                <option value="">
-                  {{ clientsLoading ? "Cargando…" : "Selecciona un cliente" }}
-                </option>
-                <option
-                  v-for="client in clients"
-                  :key="client.id"
-                  :value="client.id"
-                >
-                  {{ client.name }}
-                </option>
-              </select>
-              <p
-                v-if="!clientsLoading && clients.length === 0"
-                class="mt-1.5 text-xs text-gray-400"
-              >
-                No hay clientes.
-                <NuxtLink
-                  to="/clientes"
-                  class="text-emerald-700 hover:underline"
-                  >Crea uno primero</NuxtLink
-                >.
-              </p>
-            </div>
-
-            <div>
-              <label
-                for="concepto-doc-select"
-                class="mb-1.5 block text-sm font-medium text-gray-700"
-              >
-                Documento para Concepto Id <span class="text-rose-500">*</span>
-              </label>
-              <select
-                id="concepto-doc-select"
-                v-model="selectedConceptoDocId"
-                :disabled="!selectedClientId || clientDocumentsLoading"
-                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
-              >
-                <option value="">
-                  {{
-                    clientDocumentsLoading
-                      ? "Cargando…"
-                      : "Selecciona un documento"
-                  }}
-                </option>
-                <option
-                  v-for="doc in clientDocuments"
-                  :key="doc.id"
-                  :value="doc.id"
-                >
-                  {{ doc.document_name }} ({{ doc.document_attributes.length }}
-                  atributos)
-                </option>
-              </select>
-              <p
-                v-if="
-                  selectedClientId &&
-                  !clientDocumentsLoading &&
-                  clientDocuments.length === 0
-                "
-                class="mt-1.5 text-xs text-gray-400"
-              >
-                Este cliente no tiene documentos.
-                <NuxtLink
-                  :to="`/clientes/${selectedClientId}`"
-                  class="text-emerald-700 hover:underline"
-                  >Crea uno primero</NuxtLink
-                >.
-              </p>
-            </div>
-
-            <div>
-              <label
-                for="tipo-de-pago-doc-select"
-                class="mb-1.5 block text-sm font-medium text-gray-700"
-              >
-                Documento para Tipo de Pago Id
-                <span class="text-rose-500">*</span>
-              </label>
-              <select
-                id="tipo-de-pago-doc-select"
-                v-model="selectedTipoDePagoDocId"
-                :disabled="!selectedClientId || clientDocumentsLoading"
-                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
-              >
-                <option value="">
-                  {{
-                    clientDocumentsLoading
-                      ? "Cargando…"
-                      : "Selecciona un documento"
-                  }}
-                </option>
-                <option
-                  v-for="doc in clientDocuments"
-                  :key="doc.id"
-                  :value="doc.id"
-                >
-                  {{ doc.document_name }} ({{ doc.document_attributes.length }}
-                  atributos)
-                </option>
-              </select>
-            </div>
-          </div>
-
-          <div class="mt-4 border-t border-gray-100 pt-4">
+        <div class="grid gap-4 sm:grid-cols-3">
+          <div>
             <label
-              for="tipo-de-gasto-context-doc-select"
+              for="client-select"
               class="mb-1.5 block text-sm font-medium text-gray-700"
             >
-              Documento de contexto para Tipo de Gasto
-              <span class="font-normal text-gray-400">(opcional)</span>
+              Cliente <span class="text-rose-500">*</span>
             </label>
             <select
-              id="tipo-de-gasto-context-doc-select"
-              v-model="selectedTipoDeGastoContextDocId"
+              id="client-select"
+              v-model="selectedClientId"
+              @change="onClientChange"
+              :disabled="clientsLoading"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
+            >
+              <option value="">
+                {{ clientsLoading ? "Cargando…" : "Selecciona un cliente" }}
+              </option>
+              <option
+                v-for="client in clients"
+                :key="client.id"
+                :value="client.id"
+              >
+                {{ client.name }}
+              </option>
+            </select>
+            <p
+              v-if="!clientsLoading && clients.length === 0"
+              class="mt-1.5 text-xs text-gray-400"
+            >
+              No hay clientes.
+              <NuxtLink to="/clientes" class="text-emerald-700 hover:underline"
+                >Crea uno primero</NuxtLink
+              >.
+            </p>
+          </div>
+
+          <div>
+            <label
+              for="concepto-doc-select"
+              class="mb-1.5 block text-sm font-medium text-gray-700"
+            >
+              Documento para Concepto Id <span class="text-rose-500">*</span>
+            </label>
+            <select
+              id="concepto-doc-select"
+              v-model="selectedConceptoDocId"
               :disabled="!selectedClientId || clientDocumentsLoading"
-              class="w-full max-w-md rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
             >
               <option value="">
                 {{
                   clientDocumentsLoading
                     ? "Cargando…"
-                    : "Sin contexto adicional"
+                    : "Selecciona un documento"
                 }}
               </option>
               <option
@@ -223,17 +140,147 @@
                 atributos)
               </option>
             </select>
-            <p class="mt-1.5 text-xs text-gray-400">
-              El "Tipo de Gasto" siempre se elige entre las 11 opciones fijas
-              de la app. Si seleccionas un documento aquí, sus atributos y
-              comentario se envían a la IA solo como contexto para ayudarla a
-              elegir mejor entre esas 11 opciones para este cliente.
+            <p
+              v-if="
+                selectedClientId &&
+                !clientDocumentsLoading &&
+                clientDocuments.length === 0
+              "
+              class="mt-1.5 text-xs text-gray-400"
+            >
+              Este cliente no tiene documentos.
+              <NuxtLink
+                :to="`/clientes/${selectedClientId}`"
+                class="text-emerald-700 hover:underline"
+                >Crea uno primero</NuxtLink
+              >.
             </p>
           </div>
 
-          <p
-            v-if="!canScan"
-            class="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800"
+          <div>
+            <label
+              for="tipo-de-pago-doc-select"
+              class="mb-1.5 block text-sm font-medium text-gray-700"
+            >
+              Documento para Tipo de Pago Id
+              <span class="text-rose-500">*</span>
+            </label>
+            <select
+              id="tipo-de-pago-doc-select"
+              v-model="selectedTipoDePagoDocId"
+              :disabled="!selectedClientId || clientDocumentsLoading"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
+            >
+              <option value="">
+                {{
+                  clientDocumentsLoading
+                    ? "Cargando…"
+                    : "Selecciona un documento"
+                }}
+              </option>
+              <option
+                v-for="doc in clientDocuments"
+                :key="doc.id"
+                :value="doc.id"
+              >
+                {{ doc.document_name }} ({{ doc.document_attributes.length }}
+                atributos)
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mt-4 border-t border-gray-100 pt-4">
+          <label
+            for="tipo-de-gasto-context-doc-select"
+            class="mb-1.5 block text-sm font-medium text-gray-700"
+          >
+            Documento de contexto para Tipo de Gasto
+            <span class="font-normal text-gray-400">(opcional)</span>
+          </label>
+          <select
+            id="tipo-de-gasto-context-doc-select"
+            v-model="selectedTipoDeGastoContextDocId"
+            :disabled="!selectedClientId || clientDocumentsLoading"
+            class="w-full max-w-md rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
+          >
+            <option value="">
+              {{
+                clientDocumentsLoading ? "Cargando…" : "Sin contexto adicional"
+              }}
+            </option>
+            <option
+              v-for="doc in clientDocuments"
+              :key="doc.id"
+              :value="doc.id"
+            >
+              {{ doc.document_name }} ({{ doc.document_attributes.length }}
+              atributos)
+            </option>
+          </select>
+          <p class="mt-1.5 text-xs text-gray-400">
+            El "Tipo de Gasto" siempre se elige entre las 11 opciones fijas de
+            la app. Si seleccionas un documento aquí, sus atributos y comentario
+            se envían a la IA solo como contexto para ayudarla a elegir mejor
+            entre esas 11 opciones para este cliente.
+          </p>
+        </div>
+
+        <p
+          v-if="!canScan"
+          class="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800"
+        >
+          <svg
+            class="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          Selecciona un cliente y sus documentos de Concepto Id / Tipo de Pago
+          Id antes de subir o procesar archivos.
+        </p>
+      </section>
+
+      <!-- Add files card -->
+      <section
+        class="rounded-xl border border-gray-200 bg-white shadow-sm"
+        :class="{ 'pointer-events-none opacity-50': !canScan }"
+      >
+        <button
+          type="button"
+          @click="addFilesOpen = !addFilesOpen"
+          class="flex w-full items-center justify-between px-5 py-4"
+        >
+          <span class="text-base font-semibold text-gray-900"
+            >Agregar archivos</span
+          >
+          <svg
+            class="h-4 w-4 text-gray-500 transition-transform"
+            :class="{ '-rotate-180': !addFilesOpen }"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M5 15l7-7 7 7"
+            />
+          </svg>
+        </button>
+
+        <div v-show="addFilesOpen" class="px-5 pb-5">
+          <!-- Warning banner -->
+          <div
+            class="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800"
           >
             <svg
               class="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500"
@@ -248,27 +295,174 @@
                 d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            Selecciona un cliente y sus documentos de Concepto Id / Tipo de Pago
-            Id antes de subir o procesar archivos.
-          </p>
-        </section>
+            Si subes un PDF, asegúrate de poder seleccionar/resaltar el texto.
+          </div>
 
-        <!-- Add files card -->
-        <section
-          class="rounded-xl border border-gray-200 bg-white shadow-sm"
-          :class="{ 'pointer-events-none opacity-50': !canScan }"
-        >
-          <button
-            type="button"
-            @click="addFilesOpen = !addFilesOpen"
-            class="flex w-full items-center justify-between px-5 py-4"
+          <!-- Drag & drop -->
+          <div
+            class="group cursor-pointer rounded-xl border-2 border-dashed border-gray-300 bg-gray-50/60 px-6 py-12 text-center transition hover:border-emerald-400 hover:bg-emerald-50/40"
+            @drop="handleDrop"
+            @dragover.prevent
+            @dragenter.prevent
+            @click="canScan && fileInput?.click()"
           >
-            <span class="text-base font-semibold text-gray-900"
-              >Agregar archivos</span
+            <input
+              ref="fileInput"
+              type="file"
+              multiple
+              accept=".pdf,.png,.jpg,.jpeg"
+              :disabled="!canScan"
+              @change="handleFileSelect"
+              class="hidden"
+            />
+            <div
+              class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-400 transition group-hover:bg-emerald-100 group-hover:text-emerald-600"
             >
+              <svg
+                class="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                />
+              </svg>
+            </div>
+            <p class="text-sm font-medium text-gray-700">
+              Arrastra y suelta archivos aquí, o haz clic para seleccionar
+            </p>
+            <p class="mt-1 text-xs text-gray-400">
+              Tipos soportados: pdf, png, jpg, jpeg · Máx
+              {{ MAX_FILE_SIZE_LABEL }} por archivo · los PDF se dividen en una
+              fila por página
+            </p>
+            <p
+              v-if="splittingPdfs > 0"
+              class="mt-3 flex items-center justify-center gap-2 text-sm text-emerald-600"
+            >
+              <svg
+                class="h-4 w-4 animate-spin"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke-width="3"
+                  stroke-opacity="0.25"
+                />
+                <path
+                  stroke-linecap="round"
+                  stroke-width="3"
+                  d="M22 12a10 10 0 00-10-10"
+                />
+              </svg>
+              Dividiendo {{ splittingPdfs }} PDF{{
+                splittingPdfs === 1 ? "" : "s"
+              }}
+              en páginas...
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Rate limit / cooldown banner -->
+      <div
+        v-if="batchLimit.isLimited.value || individualLimit.isLimited.value"
+        class="mt-6 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-5 py-4 text-rose-700"
+      >
+        <svg
+          class="mt-0.5 h-5 w-5 flex-shrink-0 text-rose-500"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+        <div class="flex-1 space-y-1.5 text-sm">
+          <p v-if="batchLimit.isLimited.value">
+            <span class="font-semibold">Procesar</span> en enfriamiento ({{
+              batchLimit.used.value
+            }}
+            / {{ BATCH_RPM }} por minuto) — reintenta en
+            <span class="font-mono font-bold">{{ batchLimit.label.value }}</span
+            >.
+          </p>
+          <p v-if="individualLimit.isLimited.value">
+            <span class="font-semibold">Reintentar / Reevaluar</span> en
+            enfriamiento ({{ individualLimit.used.value }} /
+            {{ INDIVIDUAL_RPM }} por minuto) — reintenta en
+            <span class="font-mono font-bold">{{
+              individualLimit.label.value
+            }}</span
+            >.
+          </p>
+        </div>
+      </div>
+
+      <!-- Scanned information table -->
+      <section v-if="files.length > 0" class="mt-10">
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="text-base font-semibold text-gray-900">
+              Información escaneada
+            </h2>
+            <div
+              class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5"
+            >
+              <button
+                type="button"
+                class="rounded-md px-3 py-1 text-xs font-semibold transition"
+                :class="
+                  tableView === 'active'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                "
+                @click="tableView = 'active'"
+              >
+                Activos
+                <span
+                  class="ml-1 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500"
+                  >{{ activeFiles.length }}</span
+                >
+              </button>
+              <button
+                type="button"
+                class="rounded-md px-3 py-1 text-xs font-semibold transition"
+                :class="
+                  tableView === 'review_later'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                "
+                @click="tableView = 'review_later'"
+              >
+                Revisar más tarde
+                <span
+                  class="ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                  :class="
+                    reviewLaterFiles.length
+                      ? 'bg-violet-100 text-violet-700'
+                      : 'bg-gray-100 text-gray-500'
+                  "
+                  >{{ reviewLaterFiles.length }}</span
+                >
+              </button>
+            </div>
+          </div>
+          <div class="relative">
             <svg
-              class="h-4 w-4 text-gray-500 transition-transform"
-              :class="{ '-rotate-180': !addFilesOpen }"
+              class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -277,899 +471,665 @@
                 stroke-linecap="round"
                 stroke-linejoin="round"
                 stroke-width="2"
-                d="M5 15l7-7 7 7"
+                d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"
               />
             </svg>
-          </button>
-
-          <div v-show="addFilesOpen" class="px-5 pb-5">
-            <!-- Warning banner -->
-            <div
-              class="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800"
-            >
-              <svg
-                class="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              Si subes un PDF, asegúrate de poder seleccionar/resaltar el texto.
-            </div>
-
-            <!-- Drag & drop -->
-            <div
-              class="group cursor-pointer rounded-xl border-2 border-dashed border-gray-300 bg-gray-50/60 px-6 py-12 text-center transition hover:border-emerald-400 hover:bg-emerald-50/40"
-              @drop="handleDrop"
-              @dragover.prevent
-              @dragenter.prevent
-              @click="canScan && fileInput?.click()"
-            >
-              <input
-                ref="fileInput"
-                type="file"
-                multiple
-                accept=".pdf,.png,.jpg,.jpeg"
-                :disabled="!canScan"
-                @change="handleFileSelect"
-                class="hidden"
-              />
-              <div
-                class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-400 transition group-hover:bg-emerald-100 group-hover:text-emerald-600"
-              >
-                <svg
-                  class="h-5 w-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                  />
-                </svg>
-              </div>
-              <p class="text-sm font-medium text-gray-700">
-                Arrastra y suelta archivos aquí, o haz clic para seleccionar
-              </p>
-              <p class="mt-1 text-xs text-gray-400">
-                Tipos soportados: pdf, png, jpg, jpeg · Máx
-                {{ MAX_FILE_SIZE_LABEL }} por archivo · los PDF se dividen en
-                una fila por página
-              </p>
-              <p
-                v-if="splittingPdfs > 0"
-                class="mt-3 flex items-center justify-center gap-2 text-sm text-emerald-600"
-              >
-                <svg
-                  class="h-4 w-4 animate-spin"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke-width="3"
-                    stroke-opacity="0.25"
-                  />
-                  <path
-                    stroke-linecap="round"
-                    stroke-width="3"
-                    d="M22 12a10 10 0 00-10-10"
-                  />
-                </svg>
-                Dividiendo {{ splittingPdfs }} PDF{{
-                  splittingPdfs === 1 ? "" : "s"
-                }}
-                en páginas...
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <!-- Rate limit / cooldown banner -->
-        <div
-          v-if="batchLimit.isLimited.value || individualLimit.isLimited.value"
-          class="mt-6 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-5 py-4 text-rose-700"
-        >
-          <svg
-            class="mt-0.5 h-5 w-5 flex-shrink-0 text-rose-500"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+            <input
+              v-model="search"
+              type="text"
+              placeholder="Buscar..."
+              class="w-56 rounded-lg border border-gray-300 bg-white py-1.5 pl-9 pr-3 text-sm text-gray-700 placeholder-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
             />
-          </svg>
-          <div class="flex-1 space-y-1.5 text-sm">
-            <p v-if="batchLimit.isLimited.value">
-              <span class="font-semibold">Procesar</span> en enfriamiento ({{
-                batchLimit.used.value
-              }}
-              / {{ BATCH_RPM }} por minuto) — reintenta en
-              <span class="font-mono font-bold">{{
-                batchLimit.label.value
-              }}</span
-              >.
-            </p>
-            <p v-if="individualLimit.isLimited.value">
-              <span class="font-semibold">Reintentar / Reevaluar</span> en
-              enfriamiento ({{ individualLimit.used.value }} /
-              {{ INDIVIDUAL_RPM }} por minuto) — reintenta en
-              <span class="font-mono font-bold">{{
-                individualLimit.label.value
-              }}</span
-              >.
-            </p>
           </div>
         </div>
 
-        <!-- Scanned information table -->
-        <section v-if="files.length > 0" class="mt-10">
-          <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div class="flex flex-wrap items-center gap-3">
-              <h2 class="text-base font-semibold text-gray-900">
-                Información escaneada
-              </h2>
-              <div
-                class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5"
-              >
-                <button
-                  type="button"
-                  class="rounded-md px-3 py-1 text-xs font-semibold transition"
-                  :class="
-                    tableView === 'active'
-                      ? 'bg-white text-gray-900 shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'
-                  "
-                  @click="tableView = 'active'"
-                >
-                  Activos
-                  <span
-                    class="ml-1 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500"
-                    >{{ activeFiles.length }}</span
-                  >
-                </button>
-                <button
-                  type="button"
-                  class="rounded-md px-3 py-1 text-xs font-semibold transition"
-                  :class="
-                    tableView === 'review_later'
-                      ? 'bg-white text-gray-900 shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'
-                  "
-                  @click="tableView = 'review_later'"
-                >
-                  Revisar más tarde
-                  <span
-                    class="ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-                    :class="
-                      reviewLaterFiles.length
-                        ? 'bg-violet-100 text-violet-700'
-                        : 'bg-gray-100 text-gray-500'
-                    "
-                    >{{ reviewLaterFiles.length }}</span
-                  >
-                </button>
-              </div>
-            </div>
-            <div class="relative">
-              <svg
-                class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"
-                />
-              </svg>
-              <input
-                v-model="search"
-                type="text"
-                placeholder="Buscar..."
-                class="w-56 rounded-lg border border-gray-300 bg-white py-1.5 pl-9 pr-3 text-sm text-gray-700 placeholder-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-              />
-            </div>
-          </div>
+        <p
+          v-if="tableView === 'review_later'"
+          class="mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800"
+        >
+          Estas filas no se incluyen en el Excel de salida. Úsalas para corregir
+          errores que Citrus detecta al subir y vuelve a
+          <strong>Incluir</strong> cuando estén listas.
+        </p>
 
-          <p
-            v-if="tableView === 'review_later'"
-            class="mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800"
-          >
-            Estas filas no se incluyen en el Excel de salida. Úsalas para
-            corregir errores que Citrus detecta al subir y vuelve a
-            <strong>Incluir</strong> cuando estén listas.
+        <!-- Bulk selection toolbar -->
+        <div
+          v-if="selectedCount > 0"
+          class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5"
+        >
+          <p class="text-sm font-medium text-emerald-900">
+            {{ selectedCount }} fila{{
+              selectedCount === 1 ? "" : "s"
+            }}
+            seleccionada{{ selectedCount === 1 ? "" : "s" }}
           </p>
-
-          <!-- Bulk selection toolbar -->
-          <div
-            v-if="selectedCount > 0"
-            class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5"
-          >
-            <p class="text-sm font-medium text-emerald-900">
-              {{ selectedCount }} fila{{ selectedCount === 1 ? "" : "s" }}
-              seleccionada{{ selectedCount === 1 ? "" : "s" }}
-            </p>
-            <div class="flex flex-wrap items-center gap-2">
-              <button
-                v-if="tableView === 'active'"
-                type="button"
-                class="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-800"
-                @click="deferSelectedForLater"
-              >
-                Excluir y revisar más tarde
-              </button>
-              <button
-                v-else
-                type="button"
-                class="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-800"
-                @click="restoreSelectedFromLater"
-              >
-                Incluir de nuevo
-              </button>
-              <button
-                type="button"
-                class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-                @click="clearSelection"
-              >
-                Limpiar selección
-              </button>
-            </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              v-if="tableView === 'active'"
+              type="button"
+              class="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-800"
+              @click="deferSelectedForLater"
+            >
+              Excluir y revisar más tarde
+            </button>
+            <button
+              v-else
+              type="button"
+              class="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-800"
+              @click="restoreSelectedFromLater"
+            >
+              Incluir de nuevo
+            </button>
+            <button
+              type="button"
+              class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+              @click="clearSelection"
+            >
+              Limpiar selección
+            </button>
           </div>
+        </div>
 
-          <div
-            class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
-          >
-            <div class="overflow-x-auto">
-              <table class="w-full">
-                <thead class="border-b border-gray-200 bg-gray-50">
-                  <tr>
-                    <th class="w-10 px-3 py-3 text-center">
-                      <input
-                        type="checkbox"
-                        class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                        :checked="allVisibleSelected"
-                        :indeterminate.prop="someVisibleSelected && !allVisibleSelected"
-                        :disabled="filteredFiles.length === 0"
-                        :title="
-                          allVisibleSelected
-                            ? 'Deseleccionar todas'
-                            : 'Seleccionar todas'
-                        "
-                        @change="toggleSelectAllVisible"
+        <div
+          class="max-h-[80vh] rounded-xl border border-gray-200 bg-white shadow-sm overflow-auto"
+        >
+          <table class="w-full">
+            <thead
+              class="border-b border-slate-300 bg-gray-50 sticky top-0 z-50"
+            >
+              <tr>
+                <th class="w-10 px-3 py-3 text-center sticky left-0 bg-gray-50">
+                  <input
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    :checked="allVisibleSelected"
+                    :indeterminate.prop="
+                      someVisibleSelected && !allVisibleSelected
+                    "
+                    :disabled="filteredFiles.length === 0"
+                    :title="
+                      allVisibleSelected
+                        ? 'Deseleccionar todas'
+                        : 'Seleccionar todas'
+                    "
+                    @change="toggleSelectAllVisible"
+                  />
+                </th>
+                <th
+                  v-for="col in columns"
+                  :key="col"
+                  class="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500"
+                  :class="
+                    col === 'Preview' || col === 'Acciones' ? 'text-center' : ''
+                  "
+                >
+                  {{ col }}
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <tr v-if="filteredFiles.length === 0" class="bg-white">
+                <td
+                  :colspan="columns.length + 1"
+                  class="px-4 py-8 text-center text-sm text-gray-400"
+                >
+                  {{
+                    tableView === "review_later"
+                      ? "No hay filas marcadas para revisar más tarde."
+                      : search.trim()
+                        ? "Ninguna fila coincide con la búsqueda."
+                        : "No hay filas activas."
+                  }}
+                </td>
+              </tr>
+              <tr
+                v-for="(file, index) in filteredFiles"
+                :key="file.id"
+                class="cursor-pointer transition-colors hover:bg-gray-50"
+                :class="{
+                  'bg-amber-50': isEdited(file),
+                  'bg-emerald-50/60': isSelected(file.id),
+                }"
+                @click="onRowClick($event, file.id)"
+              >
+                <td
+                  class="px-3 py-2.5 text-center sticky left-0 bg-white hover:bg-gray-50"
+                >
+                  <input
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    :checked="isSelected(file.id)"
+                    @change="toggleSelect(file.id)"
+                  />
+                </td>
+                <td class="px-4 py-2.5">
+                  <span class="text-sm text-gray-500">{{ index + 1 }}</span>
+                </td>
+                <!-- Documento -->
+                <td class="px-2 py-2.5">
+                  <input
+                    type="text"
+                    inputmode="numeric"
+                    :value="file.editableData.documento"
+                    @focus="startEditing(file)"
+                    @input="
+                      file.editableData.documento = String(
+                        $event.target.value || '',
+                      ).replace(/\D/g, '')
+                    "
+                    class="w-28 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    placeholder="-"
+                  />
+                </td>
+
+                <!-- Status -->
+                <td class="px-2 py-2.5">
+                  <span
+                    v-if="file.reviewLater"
+                    class="inline-flex rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-semibold text-violet-700"
+                    title="Excluida del Excel — revisar más tarde"
+                  >
+                    Revisar más tarde
+                  </span>
+                  <span
+                    v-else
+                    class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold"
+                    :class="getStatusClasses(file.status)"
+                    :title="
+                      file.status === 'duplicate'
+                        ? file.duplicateMessage
+                        : undefined
+                    "
+                  >
+                    {{ getStatusLabel(file.status) }}
+                  </span>
+                </td>
+                <!-- Score -->
+                <td class="px-2 py-2.5">
+                  <span
+                    v-if="file.score > 0"
+                    class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold"
+                    :class="getScoreClasses(file.score)"
+                  >
+                    {{ file.score }}
+                  </span>
+                  <span v-else class="text-gray-300">-</span>
+                </td>
+                <!-- Processing Time -->
+                <td class="px-2 py-2.5">
+                  <span
+                    v-if="file.processingTime"
+                    class="font-mono text-sm text-gray-500"
+                  >
+                    {{ formatTime(file.processingTime) }}
+                  </span>
+                  <span v-else class="text-gray-300">-</span>
+                </td>
+                <!-- Nombre -->
+                <td class="px-2 py-2.5">
+                  <input
+                    type="text"
+                    v-model="file.editableData.nombre"
+                    maxlength="255"
+                    @focus="startEditing(file)"
+                    class="w-36 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    placeholder="-"
+                  />
+                </td>
+
+                <!-- NCF -->
+                <td class="px-2 py-2.5">
+                  <input
+                    type="text"
+                    v-model="file.editableData.ncf"
+                    @focus="startEditing(file)"
+                    @blur="
+                      file.editableData.ncf = normalizeNcf(
+                        file.editableData.ncf,
+                      )
+                    "
+                    class="w-36 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    placeholder="-"
+                  />
+                </td>
+                <!-- NCF Afectado -->
+                <td class="px-2 py-2.5">
+                  <input
+                    type="text"
+                    v-model="file.editableData.ncf_afectado"
+                    maxlength="11"
+                    @focus="startEditing(file)"
+                    @blur="
+                      file.editableData.ncf_afectado = normalizeNcf(
+                        file.editableData.ncf_afectado,
+                      ).slice(0, 11)
+                    "
+                    class="w-28 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    :class="{
+                      'ring-1 ring-amber-400':
+                        requiresNcfAfectado(file.editableData.ncf) &&
+                        !file.editableData.ncf_afectado,
+                    }"
+                    placeholder="-"
+                    :title="
+                      requiresNcfAfectado(file.editableData.ncf)
+                        ? 'Obligatorio cuando NCF es B03 o B04'
+                        : ''
+                    "
+                  />
+                </td>
+                <!-- Tipo de Suplidor -->
+                <td class="px-2 py-2.5">
+                  <select
+                    v-model="file.editableData.tipo_de_suplidor"
+                    @focus="startEditing(file)"
+                    class="w-36 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                  >
+                    <option value="">-</option>
+                    <option
+                      v-if="
+                        file.editableData.tipo_de_suplidor &&
+                        !TIPO_DE_SUPLIDOR_OPTIONS.includes(
+                          file.editableData.tipo_de_suplidor,
+                        )
+                      "
+                      :value="file.editableData.tipo_de_suplidor"
+                    >
+                      {{ file.editableData.tipo_de_suplidor }}
+                    </option>
+                    <option
+                      v-for="opt in TIPO_DE_SUPLIDOR_OPTIONS"
+                      :key="opt"
+                      :value="opt"
+                    >
+                      {{ opt }}
+                    </option>
+                  </select>
+                </td>
+                <!-- Tipo de Gasto -->
+                <td class="px-2 py-2.5">
+                  <select
+                    v-model="file.editableData.tipo_de_gasto"
+                    @focus="startEditing(file)"
+                    class="w-64 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                  >
+                    <option value="">-</option>
+                    <option
+                      v-if="
+                        file.editableData.tipo_de_gasto &&
+                        !TIPO_DE_GASTO_OPTIONS.includes(
+                          file.editableData.tipo_de_gasto,
+                        )
+                      "
+                      :value="file.editableData.tipo_de_gasto"
+                    >
+                      {{ file.editableData.tipo_de_gasto }}
+                    </option>
+                    <option
+                      v-for="opt in TIPO_DE_GASTO_OPTIONS"
+                      :key="opt"
+                      :value="opt"
+                    >
+                      {{ opt }}
+                    </option>
+                  </select>
+                </td>
+                <!-- Descripción -->
+                <td class="px-2 py-2.5">
+                  <input
+                    type="text"
+                    v-model="file.editableData.descripcion"
+                    maxlength="200"
+                    @focus="startEditing(file)"
+                    class="w-36 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    placeholder="-"
+                  />
+                </td>
+                <!-- Fecha -->
+                <td class="px-2 py-2.5">
+                  <input
+                    type="text"
+                    v-model="file.editableData.fecha"
+                    @focus="startEditing(file)"
+                    @blur="
+                      file.editableData.fecha = normalizeFecha(
+                        file.editableData.fecha,
+                      )
+                    "
+                    class="w-24 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    placeholder="DD/MM/AAAA"
+                  />
+                </td>
+                <!-- Monto en Servicios -->
+                <td class="px-2 py-2.5">
+                  <div class="flex items-center">
+                    <span class="mr-1 text-sm text-gray-400">$</span>
+                    <input
+                      type="text"
+                      inputmode="decimal"
+                      v-model="file.editableData.monto_en_servicios"
+                      @focus="startEditing(file)"
+                      class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-700 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      placeholder="0"
+                    />
+                  </div>
+                </td>
+                <!-- Monto en Bienes -->
+                <td class="px-2 py-2.5">
+                  <div class="flex items-center">
+                    <span class="mr-1 text-sm text-gray-400">$</span>
+                    <input
+                      type="text"
+                      inputmode="decimal"
+                      v-model="file.editableData.monto_en_bienes"
+                      @focus="startEditing(file)"
+                      class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-700 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      placeholder="0"
+                    />
+                  </div>
+                </td>
+                <!-- ITBIS -->
+                <td class="px-2 py-2.5">
+                  <div class="flex items-center">
+                    <span class="mr-1 text-sm text-gray-400">$</span>
+                    <input
+                      type="text"
+                      v-model="file.editableData.itbis"
+                      @focus="startEditing(file)"
+                      class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      placeholder="-"
+                    />
+                  </div>
+                </td>
+                <!-- Selectivo -->
+                <td class="px-2 py-2.5">
+                  <div class="flex items-center">
+                    <span class="mr-1 text-sm text-gray-400">$</span>
+                    <input
+                      type="text"
+                      v-model="file.editableData.selectivo"
+                      @focus="startEditing(file)"
+                      class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      placeholder="-"
+                    />
+                  </div>
+                </td>
+                <!-- Moneda -->
+                <td class="px-2 py-2.5">
+                  <input
+                    type="text"
+                    v-model="file.editableData.moneda"
+                    @focus="startEditing(file)"
+                    class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm uppercase text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    placeholder="-"
+                  />
+                </td>
+                <!-- Forma de Pago -->
+                <td class="px-2 py-2.5">
+                  <input
+                    type="text"
+                    v-model="file.editableData.metodo_de_pago"
+                    @focus="startEditing(file)"
+                    class="w-40 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    placeholder="-"
+                  />
+                </td>
+                <!-- Concepto Id -->
+                <td class="px-2 py-2.5">
+                  <select
+                    v-model="file.editableData.concepto_id"
+                    @focus="startEditing(file)"
+                    class="w-48 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                  >
+                    <option :value="null">-</option>
+                    <option
+                      v-if="
+                        file.editableData.concepto_id !== null &&
+                        !conceptoOptions.some(
+                          (o) =>
+                            o.document_id === file.editableData.concepto_id,
+                        )
+                      "
+                      :value="file.editableData.concepto_id"
+                    >
+                      Id {{ file.editableData.concepto_id }} (fuera de catálogo)
+                    </option>
+                    <option
+                      v-for="opt in conceptoOptions"
+                      :key="opt.id"
+                      :value="opt.document_id"
+                    >
+                      {{ opt.document_type }} ({{ opt.document_id }})
+                    </option>
+                  </select>
+                </td>
+                <!-- Tipo de Pago Id -->
+                <td class="px-2 py-2.5">
+                  <select
+                    v-model="file.editableData.tipo_de_pago_id"
+                    @focus="startEditing(file)"
+                    class="w-48 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                  >
+                    <option :value="null">-</option>
+                    <option
+                      v-if="
+                        file.editableData.tipo_de_pago_id !== null &&
+                        !tipoDePagoOptions.some(
+                          (o) =>
+                            o.document_id === file.editableData.tipo_de_pago_id,
+                        )
+                      "
+                      :value="file.editableData.tipo_de_pago_id"
+                    >
+                      Id {{ file.editableData.tipo_de_pago_id }} (fuera de
+                      catálogo)
+                    </option>
+                    <option
+                      v-for="opt in tipoDePagoOptions"
+                      :key="opt.id"
+                      :value="opt.document_id"
+                    >
+                      {{ opt.document_type }} ({{ opt.document_id }})
+                    </option>
+                  </select>
+                </td>
+                <!-- File Name -->
+                <td class="px-2 py-2.5">
+                  <input
+                    type="text"
+                    v-model="file.editableData.filename"
+                    @focus="startEditing(file)"
+                    class="w-44 rounded border border-transparent bg-transparent px-2 py-1 font-medium text-gray-700 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                  />
+                </td>
+
+                <!-- Preview Button -->
+                <td class="px-2 py-2.5 text-center">
+                  <button
+                    @click="openPreview(file)"
+                    class="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                    title="Vista previa"
+                  >
+                    <svg
+                      class="h-5 w-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
                       />
-                    </th>
-                    <th
-                      v-for="col in columns"
-                      :key="col"
-                      class="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500"
-                      :class="
-                        col === 'Preview' || col === 'Acciones'
-                          ? 'text-center'
-                          : ''
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                      />
+                    </svg>
+                  </button>
+                </td>
+                <!-- Actions -->
+                <td class="px-2 py-2.5 text-center">
+                  <div class="flex items-center justify-center gap-1.5">
+                    <button
+                      v-if="
+                        file.status === 'needs_retry' || file.status === 'error'
+                      "
+                      @click="retryFile(file)"
+                      :disabled="individualLimit.isLimited.value"
+                      class="rounded-lg p-2 text-emerald-600 transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      :title="
+                        individualLimit.isLimited.value
+                          ? `Límite alcanzado - espera ${individualLimit.label.value}`
+                          : 'Reintentar procesamiento'
                       "
                     >
-                      {{ col }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-100">
-                  <tr
-                    v-if="filteredFiles.length === 0"
-                    class="bg-white"
-                  >
-                    <td
-                      :colspan="columns.length + 1"
-                      class="px-4 py-8 text-center text-sm text-gray-400"
+                      <svg
+                        class="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      v-if="
+                        file.status === 'done' &&
+                        file.score > 0 &&
+                        file.score < 3
+                      "
+                      @click="reevaluateFile(file)"
+                      :disabled="individualLimit.isLimited.value"
+                      class="rounded-lg p-2 text-purple-600 transition-colors hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      :title="
+                        individualLimit.isLimited.value
+                          ? `Límite alcanzado - espera ${individualLimit.label.value}`
+                          : 'Reevaluar (baja confianza)'
+                      "
                     >
-                      {{
-                        tableView === "review_later"
-                          ? "No hay filas marcadas para revisar más tarde."
-                          : search.trim()
-                            ? "Ninguna fila coincide con la búsqueda."
-                            : "No hay filas activas."
-                      }}
-                    </td>
-                  </tr>
-                  <tr
-                    v-for="(file, index) in filteredFiles"
-                    :key="file.id"
-                    class="cursor-pointer transition-colors hover:bg-gray-50"
-                    :class="{
-                      'bg-amber-50': isEdited(file),
-                      'bg-emerald-50/60': isSelected(file.id),
-                    }"
-                    @click="onRowClick($event, file.id)"
-                  >
-                    <td class="px-3 py-2.5 text-center">
-                      <input
-                        type="checkbox"
-                        class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                        :checked="isSelected(file.id)"
-                        @change="toggleSelect(file.id)"
-                      />
-                    </td>
-                    <td class="px-4 py-2.5">
-                      <span class="text-sm text-gray-500">{{ index + 1 }}</span>
-                    </td>
-                    <!-- File Name -->
-                    <td class="px-4 py-2.5">
-                      <input
-                        type="text"
-                        v-model="file.editableData.filename"
-                        @focus="startEditing(file)"
-                        class="w-44 rounded border border-transparent bg-transparent px-2 py-1 font-medium text-gray-700 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                      />
-                    </td>
-                    <!-- Type -->
-                    <td class="px-4 py-2.5">
-                      <span
-                        class="inline-flex rounded-md px-2 py-0.5 font-mono text-xs font-semibold"
-                        :class="getExtensionClasses(getFileExtension(file))"
+                      <svg
+                        class="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                       >
-                        {{ getFileExtension(file) }}
-                      </span>
-                    </td>
-                    <!-- Status -->
-                    <td class="px-4 py-2.5">
-                      <span
-                        v-if="file.reviewLater"
-                        class="inline-flex rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-semibold text-violet-700"
-                        title="Excluida del Excel — revisar más tarde"
-                      >
-                        Revisar más tarde
-                      </span>
-                      <span
-                        v-else
-                        class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold"
-                        :class="getStatusClasses(file.status)"
-                        :title="
-                          file.status === 'duplicate'
-                            ? file.duplicateMessage
-                            : undefined
-                        "
-                      >
-                        {{ getStatusLabel(file.status) }}
-                      </span>
-                    </td>
-                    <!-- Score -->
-                    <td class="px-4 py-2.5">
-                      <span
-                        v-if="file.score > 0"
-                        class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold"
-                        :class="getScoreClasses(file.score)"
-                      >
-                        {{ file.score }}
-                      </span>
-                      <span v-else class="text-gray-300">-</span>
-                    </td>
-                    <!-- Processing Time -->
-                    <td class="px-4 py-2.5">
-                      <span
-                        v-if="file.processingTime"
-                        class="font-mono text-sm text-gray-500"
-                      >
-                        {{ formatTime(file.processingTime) }}
-                      </span>
-                      <span v-else class="text-gray-300">-</span>
-                    </td>
-                    <!-- Nombre -->
-                    <td class="px-4 py-2.5">
-                      <input
-                        type="text"
-                        v-model="file.editableData.nombre"
-                        maxlength="255"
-                        @focus="startEditing(file)"
-                        class="w-36 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                        placeholder="-"
-                      />
-                    </td>
-                    <!-- Documento -->
-                    <td class="px-4 py-2.5">
-                      <input
-                        type="text"
-                        inputmode="numeric"
-                        :value="file.editableData.documento"
-                        @focus="startEditing(file)"
-                        @input="
-                          file.editableData.documento = String(
-                            $event.target.value || '',
-                          ).replace(/\D/g, '')
-                        "
-                        class="w-28 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                        placeholder="-"
-                      />
-                    </td>
-                    <!-- NCF -->
-                    <td class="px-4 py-2.5">
-                      <input
-                        type="text"
-                        v-model="file.editableData.ncf"
-                        @focus="startEditing(file)"
-                        @blur="
-                          file.editableData.ncf = normalizeNcf(
-                            file.editableData.ncf,
-                          )
-                        "
-                        class="w-36 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                        placeholder="-"
-                      />
-                    </td>
-                    <!-- NCF Afectado -->
-                    <td class="px-4 py-2.5">
-                      <input
-                        type="text"
-                        v-model="file.editableData.ncf_afectado"
-                        maxlength="11"
-                        @focus="startEditing(file)"
-                        @blur="
-                          file.editableData.ncf_afectado = normalizeNcf(
-                            file.editableData.ncf_afectado,
-                          ).slice(0, 11)
-                        "
-                        class="w-28 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                        :class="{
-                          'ring-1 ring-amber-400':
-                            requiresNcfAfectado(file.editableData.ncf) &&
-                            !file.editableData.ncf_afectado,
-                        }"
-                        placeholder="-"
-                        :title="
-                          requiresNcfAfectado(file.editableData.ncf)
-                            ? 'Obligatorio cuando NCF es B03 o B04'
-                            : ''
-                        "
-                      />
-                    </td>
-                    <!-- Tipo de Suplidor -->
-                    <td class="px-4 py-2.5">
-                      <select
-                        v-model="file.editableData.tipo_de_suplidor"
-                        @focus="startEditing(file)"
-                        class="w-36 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                      >
-                        <option value="">-</option>
-                        <option
-                          v-if="
-                            file.editableData.tipo_de_suplidor &&
-                            !TIPO_DE_SUPLIDOR_OPTIONS.includes(
-                              file.editableData.tipo_de_suplidor,
-                            )
-                          "
-                          :value="file.editableData.tipo_de_suplidor"
-                        >
-                          {{ file.editableData.tipo_de_suplidor }}
-                        </option>
-                        <option
-                          v-for="opt in TIPO_DE_SUPLIDOR_OPTIONS"
-                          :key="opt"
-                          :value="opt"
-                        >
-                          {{ opt }}
-                        </option>
-                      </select>
-                    </td>
-                    <!-- Tipo de Gasto -->
-                    <td class="px-4 py-2.5">
-                      <select
-                        v-model="file.editableData.tipo_de_gasto"
-                        @focus="startEditing(file)"
-                        class="w-64 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                      >
-                        <option value="">-</option>
-                        <option
-                          v-if="
-                            file.editableData.tipo_de_gasto &&
-                            !TIPO_DE_GASTO_OPTIONS.includes(
-                              file.editableData.tipo_de_gasto,
-                            )
-                          "
-                          :value="file.editableData.tipo_de_gasto"
-                        >
-                          {{ file.editableData.tipo_de_gasto }}
-                        </option>
-                        <option
-                          v-for="opt in TIPO_DE_GASTO_OPTIONS"
-                          :key="opt"
-                          :value="opt"
-                        >
-                          {{ opt }}
-                        </option>
-                      </select>
-                    </td>
-                    <!-- Descripción -->
-                    <td class="px-4 py-2.5">
-                      <input
-                        type="text"
-                        v-model="file.editableData.descripcion"
-                        maxlength="200"
-                        @focus="startEditing(file)"
-                        class="w-36 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                        placeholder="-"
-                      />
-                    </td>
-                    <!-- Fecha -->
-                    <td class="px-4 py-2.5">
-                      <input
-                        type="text"
-                        v-model="file.editableData.fecha"
-                        @focus="startEditing(file)"
-                        @blur="
-                          file.editableData.fecha = normalizeFecha(
-                            file.editableData.fecha,
-                          )
-                        "
-                        class="w-24 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                        placeholder="DD/MM/AAAA"
-                      />
-                    </td>
-                    <!-- Monto en Servicios -->
-                    <td class="px-4 py-2.5">
-                      <div class="flex items-center">
-                        <span class="mr-1 text-sm text-gray-400">$</span>
-                        <input
-                          type="text"
-                          inputmode="decimal"
-                          v-model="file.editableData.monto_en_servicios"
-                          @focus="startEditing(file)"
-                          class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-700 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                          placeholder="0"
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
                         />
-                      </div>
-                    </td>
-                    <!-- Monto en Bienes -->
-                    <td class="px-4 py-2.5">
-                      <div class="flex items-center">
-                        <span class="mr-1 text-sm text-gray-400">$</span>
-                        <input
-                          type="text"
-                          inputmode="decimal"
-                          v-model="file.editableData.monto_en_bienes"
-                          @focus="startEditing(file)"
-                          class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-700 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                          placeholder="0"
-                        />
-                      </div>
-                    </td>
-                    <!-- ITBIS -->
-                    <td class="px-4 py-2.5">
-                      <div class="flex items-center">
-                        <span class="mr-1 text-sm text-gray-400">$</span>
-                        <input
-                          type="text"
-                          v-model="file.editableData.itbis"
-                          @focus="startEditing(file)"
-                          class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                          placeholder="-"
-                        />
-                      </div>
-                    </td>
-                    <!-- Selectivo -->
-                    <td class="px-4 py-2.5">
-                      <div class="flex items-center">
-                        <span class="mr-1 text-sm text-gray-400">$</span>
-                        <input
-                          type="text"
-                          v-model="file.editableData.selectivo"
-                          @focus="startEditing(file)"
-                          class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                          placeholder="-"
-                        />
-                      </div>
-                    </td>
-                    <!-- Moneda -->
-                    <td class="px-4 py-2.5">
-                      <input
-                        type="text"
-                        v-model="file.editableData.moneda"
-                        @focus="startEditing(file)"
-                        class="w-20 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm uppercase text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                        placeholder="-"
-                      />
-                    </td>
-                    <!-- Forma de Pago -->
-                    <td class="px-4 py-2.5">
-                      <input
-                        type="text"
-                        v-model="file.editableData.metodo_de_pago"
-                        @focus="startEditing(file)"
-                        class="w-40 rounded border border-transparent bg-transparent px-2 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                        placeholder="-"
-                      />
-                    </td>
-                    <!-- Concepto Id -->
-                    <td class="px-4 py-2.5">
-                      <select
-                        v-model="file.editableData.concepto_id"
-                        @focus="startEditing(file)"
-                        class="w-48 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      </svg>
+                    </button>
+                    <button
+                      v-if="isEdited(file)"
+                      @click="revertFile(file)"
+                      class="rounded-lg p-2 text-amber-600 transition-colors hover:bg-amber-50"
+                      title="Revertir cambios"
+                    >
+                      <svg
+                        class="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                       >
-                        <option :value="null">-</option>
-                        <option
-                          v-if="
-                            file.editableData.concepto_id !== null &&
-                            !conceptoOptions.some(
-                              (o) =>
-                                o.document_id === file.editableData.concepto_id,
-                            )
-                          "
-                          :value="file.editableData.concepto_id"
-                        >
-                          Id {{ file.editableData.concepto_id }} (fuera de
-                          catálogo)
-                        </option>
-                        <option
-                          v-for="opt in conceptoOptions"
-                          :key="opt.id"
-                          :value="opt.document_id"
-                        >
-                          {{ opt.document_type }} ({{ opt.document_id }})
-                        </option>
-                      </select>
-                    </td>
-                    <!-- Tipo de Pago Id -->
-                    <td class="px-4 py-2.5">
-                      <select
-                        v-model="file.editableData.tipo_de_pago_id"
-                        @focus="startEditing(file)"
-                        class="w-48 rounded border border-transparent bg-transparent px-1 py-1 text-sm text-gray-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      v-if="!file.reviewLater"
+                      @click="deferFileForLater(file)"
+                      class="rounded-lg p-2 text-violet-600 transition-colors hover:bg-violet-50"
+                      title="Excluir y revisar más tarde"
+                    >
+                      <svg
+                        class="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                       >
-                        <option :value="null">-</option>
-                        <option
-                          v-if="
-                            file.editableData.tipo_de_pago_id !== null &&
-                            !tipoDePagoOptions.some(
-                              (o) =>
-                                o.document_id ===
-                                file.editableData.tipo_de_pago_id,
-                            )
-                          "
-                          :value="file.editableData.tipo_de_pago_id"
-                        >
-                          Id {{ file.editableData.tipo_de_pago_id }} (fuera de
-                          catálogo)
-                        </option>
-                        <option
-                          v-for="opt in tipoDePagoOptions"
-                          :key="opt.id"
-                          :value="opt.document_id"
-                        >
-                          {{ opt.document_type }} ({{ opt.document_id }})
-                        </option>
-                      </select>
-                    </td>
-                    <!-- Preview Button -->
-                    <td class="px-4 py-2.5 text-center">
-                      <button
-                        @click="openPreview(file)"
-                        class="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
-                        title="Vista previa"
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      v-else
+                      @click="restoreFileFromLater(file)"
+                      class="rounded-lg p-2 text-emerald-600 transition-colors hover:bg-emerald-50"
+                      title="Incluir de nuevo en el export"
+                    >
+                      <svg
+                        class="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                       >
-                        <svg
-                          class="h-5 w-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                          />
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                          />
-                        </svg>
-                      </button>
-                    </td>
-                    <!-- Actions -->
-                    <td class="px-4 py-2.5 text-center">
-                      <div class="flex items-center justify-center gap-1.5">
-                        <button
-                          v-if="
-                            file.status === 'needs_retry' ||
-                            file.status === 'error'
-                          "
-                          @click="retryFile(file)"
-                          :disabled="individualLimit.isLimited.value"
-                          class="rounded-lg p-2 text-emerald-600 transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          :title="
-                            individualLimit.isLimited.value
-                              ? `Límite alcanzado - espera ${individualLimit.label.value}`
-                              : 'Reintentar procesamiento'
-                          "
-                        >
-                          <svg
-                            class="h-5 w-5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                            />
-                          </svg>
-                        </button>
-                        <button
-                          v-if="
-                            file.status === 'done' &&
-                            file.score > 0 &&
-                            file.score < 3
-                          "
-                          @click="reevaluateFile(file)"
-                          :disabled="individualLimit.isLimited.value"
-                          class="rounded-lg p-2 text-purple-600 transition-colors hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          :title="
-                            individualLimit.isLimited.value
-                              ? `Límite alcanzado - espera ${individualLimit.label.value}`
-                              : 'Reevaluar (baja confianza)'
-                          "
-                        >
-                          <svg
-                            class="h-5 w-5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-                            />
-                          </svg>
-                        </button>
-                        <button
-                          v-if="isEdited(file)"
-                          @click="revertFile(file)"
-                          class="rounded-lg p-2 text-amber-600 transition-colors hover:bg-amber-50"
-                          title="Revertir cambios"
-                        >
-                          <svg
-                            class="h-5 w-5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-                            />
-                          </svg>
-                        </button>
-                        <button
-                          v-if="!file.reviewLater"
-                          @click="deferFileForLater(file)"
-                          class="rounded-lg p-2 text-violet-600 transition-colors hover:bg-violet-50"
-                          title="Excluir y revisar más tarde"
-                        >
-                          <svg
-                            class="h-5 w-5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                            />
-                          </svg>
-                        </button>
-                        <button
-                          v-else
-                          @click="restoreFileFromLater(file)"
-                          class="rounded-lg p-2 text-emerald-600 transition-colors hover:bg-emerald-50"
-                          title="Incluir de nuevo en el export"
-                        >
-                          <svg
-                            class="h-5 w-5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-                            />
-                          </svg>
-                        </button>
-                        <button
-                          @click="removeFile(file)"
-                          class="rounded-lg p-2 text-rose-500 transition-colors hover:bg-rose-50"
-                          title="Eliminar"
-                        >
-                          <svg
-                            class="h-5 w-5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M6 18L18 6M6 6l12 12"
-                            />
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-      </div>
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      @click="removeFile(file)"
+                      class="rounded-lg p-2 text-rose-500 transition-colors hover:bg-rose-50"
+                      title="Eliminar"
+                    >
+                      <svg
+                        class="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
 
-      <!-- Data sources side panel -->
-      <aside v-if="files.length > 0" class="hidden w-72 flex-shrink-0 lg:block">
-        <div
-          class="sticky top-8 max-h-[calc(100vh-4rem)] space-y-4 overflow-y-auto pb-4"
-        >
-          <h2 class="text-sm font-semibold text-gray-900">Data sources</h2>
+    <!-- Data sources side panel -->
+    <aside v-if="files.length > 0" class="hidden w-72 flex-shrink-0 lg:block">
+      <div
+        class="sticky top-8 max-h-[calc(100vh-4rem)] space-y-4 overflow-y-auto pb-4"
+      >
+        <h2 class="text-sm font-semibold text-gray-900">Data sources</h2>
 
+        <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
           <div
-            class="overflow-hidden rounded-xl border border-gray-200 bg-white"
+            class="flex items-center justify-between px-4 py-3 text-sm text-gray-700"
           >
-            <div
-              class="flex items-center justify-between px-4 py-3 text-sm text-gray-700"
-            >
-              <span class="flex items-center gap-2">
-                <svg
-                  class="h-4 w-4 text-gray-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="1.8"
-                    d="M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1zm7 0v5h5"
-                  />
-                </svg>
-                {{ sourceDocuments.length }}
-                {{ sourceDocuments.length === 1 ? "Archivo" : "Archivos" }}
-              </span>
-              <span class="font-medium text-gray-500">{{
-                formatBytes(totalSourceSize)
-              }}</span>
-            </div>
-            <div
-              class="flex items-center gap-2 border-t border-gray-100 px-4 py-3 text-sm text-gray-700"
-            >
+            <span class="flex items-center gap-2">
               <svg
                 class="h-4 w-4 text-gray-400"
                 fill="none"
@@ -1180,440 +1140,21 @@
                   stroke-linecap="round"
                   stroke-linejoin="round"
                   stroke-width="1.8"
-                  d="M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.5-2.5 2.5-15 0-18m0 18c-2.5-2.5-2.5-15 0-18M3 12h18"
+                  d="M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1zm7 0v5h5"
                 />
               </svg>
-              {{ files.length }} entradas escaneadas
-            </div>
+              {{ sourceDocuments.length }}
+              {{ sourceDocuments.length === 1 ? "Archivo" : "Archivos" }}
+            </span>
+            <span class="font-medium text-gray-500">{{
+              formatBytes(totalSourceSize)
+            }}</span>
           </div>
-
-          <!-- Multipage breakdown -->
           <div
-            v-if="multipageDocuments.length"
-            class="rounded-xl border border-gray-200 bg-white px-4 py-3"
-          >
-            <p class="mb-2 text-xs font-medium text-gray-400">
-              Documentos multipágina
-            </p>
-            <ul class="space-y-1.5">
-              <li
-                v-for="doc in multipageDocuments"
-                :key="doc.id"
-                class="flex items-center justify-between gap-2 text-xs text-gray-600"
-              >
-                <span class="truncate">{{ doc.name }}</span>
-                <span
-                  class="flex-shrink-0 rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-500"
-                  >{{ doc.pages }} entradas</span
-                >
-              </li>
-            </ul>
-          </div>
-
-          <!-- Actions -->
-          <div class="space-y-2 rounded-xl border border-gray-200 bg-white p-3">
-            <button
-              @click="processAll"
-              :disabled="
-                !canScan ||
-                processing ||
-                batchLimit.isLimited.value ||
-                files.every((f) => f.status !== 'pending' || f.reviewLater)
-              "
-              class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-              :title="
-                !canScan
-                  ? 'Selecciona cliente y documentos primero'
-                  : batchLimit.isLimited.value
-                    ? `Límite alcanzado - espera ${batchLimit.label.value}`
-                    : 'Procesar archivos pendientes con IA'
-              "
-            >
-              <template v-if="processing">Procesando...</template>
-              <template v-else-if="batchLimit.isLimited.value">
-                Enfriamiento · {{ batchLimit.label.value }}
-              </template>
-              <template v-else>Procesar</template>
-            </button>
-            <button
-              @click="canScan && fileInput?.click()"
-              :disabled="!canScan"
-              class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Cargar más documentos
-            </button>
-            <button
-              @click="clearFiles"
-              class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
-            >
-              Descartar todos
-            </button>
-            <button
-              v-if="baseExportableFilesCount > 0"
-              @click="openSuplidorSummary"
-              class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-              :disabled="exportableFilesCount === 0"
-              :title="
-                exportableFilesCount === 0
-                  ? 'Ninguna fila coincide con los filtros de exportación'
-                  : 'Descargar Excel'
-              "
-            >
-              Descargar Excel
-              <span class="ml-1 font-normal text-gray-400"
-                >({{ exportableFilesCount }})</span
-              >
-            </button>
-          </div>
-
-          <!-- NCF strip options for Excel export -->
-          <div
-            class="space-y-3 rounded-xl border border-gray-200 bg-white px-4 py-3"
-          >
-            <div class="flex items-center justify-between gap-3">
-              <div class="min-w-0">
-                <p class="text-sm font-medium text-gray-900">
-                  Remover nomenclaturas NCF
-                </p>
-                <p class="mt-0.5 text-xs text-gray-400">
-                  Al exportar, quita del inicio del valor las series tipadas
-                  (ej. B01 → 00222157). Los ceros que queden se conservan.
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                :aria-checked="stripNcfEnabled"
-                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                :class="stripNcfEnabled ? 'bg-emerald-600' : 'bg-gray-200'"
-                @click="stripNcfEnabled = !stripNcfEnabled"
-              >
-                <span
-                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"
-                  :class="stripNcfEnabled ? 'translate-x-5' : 'translate-x-0'"
-                />
-              </button>
-            </div>
-
-            <div v-if="stripNcfEnabled" class="space-y-3">
-              <div class="relative">
-                <label class="mb-1.5 block text-xs font-medium text-gray-500">
-                  Columnas del Excel
-                </label>
-                <button
-                  type="button"
-                  class="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-left text-sm text-gray-700 transition hover:border-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                  @click="stripNcfColumnDropdownOpen = !stripNcfColumnDropdownOpen"
-                >
-                  <span
-                    v-if="stripNcfColumns.length"
-                    class="flex flex-wrap gap-1"
-                  >
-                    <span
-                      v-for="key in stripNcfColumns"
-                      :key="key"
-                      class="inline-flex rounded-md bg-gray-100 px-1.5 py-0.5 text-xs font-semibold text-gray-700"
-                    >
-                      {{ stripNcfColumnLabel(key) }}
-                    </span>
-                  </span>
-                  <span v-else class="text-gray-400">Selecciona columnas…</span>
-                  <svg
-                    class="h-4 w-4 flex-shrink-0 text-gray-400 transition"
-                    :class="{ 'rotate-180': stripNcfColumnDropdownOpen }"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 9l-7 7-7-7"
-                    />
-                  </svg>
-                </button>
-                <div
-                  v-if="stripNcfColumnDropdownOpen"
-                  class="absolute left-0 right-0 z-20 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-                >
-                  <label
-                    v-for="col in STRIP_NCF_COLUMN_OPTIONS"
-                    :key="col.key"
-                    class="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    <input
-                      type="checkbox"
-                      class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                      :checked="stripNcfColumns.includes(col.key)"
-                      @change="toggleStripNcfColumn(col.key)"
-                    />
-                    <span>{{ col.label }}</span>
-                  </label>
-                </div>
-              </div>
-
-              <div>
-                <label class="mb-1.5 block text-xs font-medium text-gray-500">
-                  Nomenclaturas
-                </label>
-                <div
-                  class="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 transition focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/40"
-                  @click="stripNcfInput?.focus()"
-                >
-                  <span
-                    v-for="prefix in stripNcfPrefixes"
-                    :key="prefix"
-                    class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-gray-700"
-                  >
-                    {{ prefix }}
-                    <button
-                      type="button"
-                      class="rounded text-gray-400 hover:text-gray-700"
-                      :title="`Quitar ${prefix}`"
-                      @click.stop="removeStripNcfPrefix(prefix)"
-                    >
-                      ×
-                    </button>
-                  </span>
-                  <input
-                    ref="stripNcfInput"
-                    v-model="stripNcfDraft"
-                    type="text"
-                    class="min-w-[5rem] flex-1 border-0 bg-transparent px-1 py-0.5 font-mono text-xs text-gray-700 outline-none placeholder:font-sans placeholder:text-gray-400"
-                    placeholder="Ej: B01 y Enter"
-                    @keydown="onStripNcfDraftKeydown"
-                    @blur="commitStripNcfDraft"
-                  />
-                </div>
-                <p class="mt-1 text-[11px] text-gray-400">
-                  Escribe la serie (B01, E31…) y pulsa Enter o coma.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Include-only filter for Excel export -->
-          <div
-            class="space-y-3 rounded-xl border border-gray-200 bg-white px-4 py-3"
-          >
-            <div class="flex items-center justify-between gap-3">
-              <div class="min-w-0">
-                <p class="text-sm font-medium text-gray-900">
-                  Solo valores coincidentes
-                </p>
-                <p class="mt-0.5 text-xs text-gray-400">
-                  Exporta únicamente las filas cuyo valor en la columna
-                  elegida coincide con los tipados.
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                :aria-checked="exportIncludeEnabled"
-                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                :class="exportIncludeEnabled ? 'bg-emerald-600' : 'bg-gray-200'"
-                @click="exportIncludeEnabled = !exportIncludeEnabled"
-              >
-                <span
-                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"
-                  :class="
-                    exportIncludeEnabled ? 'translate-x-5' : 'translate-x-0'
-                  "
-                />
-              </button>
-            </div>
-
-            <div v-if="exportIncludeEnabled" class="space-y-3">
-              <div>
-                <label class="mb-1.5 block text-xs font-medium text-gray-500">
-                  Columna
-                </label>
-                <select
-                  v-model="exportIncludeColumn"
-                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                >
-                  <option
-                    v-for="col in EXPORT_VALUE_FILTER_COLUMNS"
-                    :key="col.key"
-                    :value="col.key"
-                  >
-                    {{ col.label }}
-                  </option>
-                </select>
-              </div>
-              <div>
-                <label class="mb-1.5 block text-xs font-medium text-gray-500">
-                  Valores a incluir
-                </label>
-                <div
-                  class="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 transition focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/40"
-                  @click="exportIncludeInput?.focus()"
-                >
-                  <span
-                    v-for="value in exportIncludeValues"
-                    :key="value"
-                    class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-gray-700"
-                  >
-                    {{ value }}
-                    <button
-                      type="button"
-                      class="rounded text-gray-400 hover:text-gray-700"
-                      :title="`Quitar ${value}`"
-                      @click.stop="removeExportIncludeValue(value)"
-                    >
-                      ×
-                    </button>
-                  </span>
-                  <input
-                    ref="exportIncludeInput"
-                    v-model="exportIncludeDraft"
-                    type="text"
-                    class="min-w-[5rem] flex-1 border-0 bg-transparent px-1 py-0.5 font-mono text-xs text-gray-700 outline-none placeholder:font-sans placeholder:text-gray-400"
-                    placeholder="Ej: 122029818"
-                    @keydown="onExportIncludeDraftKeydown"
-                    @blur="commitExportIncludeDraft"
-                  />
-                </div>
-                <p class="mt-1 text-[11px] text-gray-400">
-                  Escribe el valor y pulsa Enter o coma.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Exclude filter for Excel export -->
-          <div
-            class="space-y-3 rounded-xl border border-gray-200 bg-white px-4 py-3"
-          >
-            <div class="flex items-center justify-between gap-3">
-              <div class="min-w-0">
-                <p class="text-sm font-medium text-gray-900">
-                  Excluir valores coincidentes
-                </p>
-                <p class="mt-0.5 text-xs text-gray-400">
-                  Omite del Excel las filas cuyo valor en la columna elegida
-                  coincide con los tipados.
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                :aria-checked="exportExcludeEnabled"
-                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                :class="exportExcludeEnabled ? 'bg-emerald-600' : 'bg-gray-200'"
-                @click="exportExcludeEnabled = !exportExcludeEnabled"
-              >
-                <span
-                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"
-                  :class="
-                    exportExcludeEnabled ? 'translate-x-5' : 'translate-x-0'
-                  "
-                />
-              </button>
-            </div>
-
-            <div v-if="exportExcludeEnabled" class="space-y-3">
-              <div>
-                <label class="mb-1.5 block text-xs font-medium text-gray-500">
-                  Columna
-                </label>
-                <select
-                  v-model="exportExcludeColumn"
-                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                >
-                  <option
-                    v-for="col in EXPORT_VALUE_FILTER_COLUMNS"
-                    :key="col.key"
-                    :value="col.key"
-                  >
-                    {{ col.label }}
-                  </option>
-                </select>
-              </div>
-              <div>
-                <label class="mb-1.5 block text-xs font-medium text-gray-500">
-                  Valores a excluir
-                </label>
-                <div
-                  class="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 transition focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/40"
-                  @click="exportExcludeInput?.focus()"
-                >
-                  <span
-                    v-for="value in exportExcludeValues"
-                    :key="value"
-                    class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-gray-700"
-                  >
-                    {{ value }}
-                    <button
-                      type="button"
-                      class="rounded text-gray-400 hover:text-gray-700"
-                      :title="`Quitar ${value}`"
-                      @click.stop="removeExportExcludeValue(value)"
-                    >
-                      ×
-                    </button>
-                  </span>
-                  <input
-                    ref="exportExcludeInput"
-                    v-model="exportExcludeDraft"
-                    type="text"
-                    class="min-w-[5rem] flex-1 border-0 bg-transparent px-1 py-0.5 font-mono text-xs text-gray-700 outline-none placeholder:font-sans placeholder:text-gray-400"
-                    placeholder="Ej: 122029818"
-                    @keydown="onExportExcludeDraftKeydown"
-                    @blur="commitExportExcludeDraft"
-                  />
-                </div>
-                <p class="mt-1 text-[11px] text-gray-400">
-                  Escribe el valor y pulsa Enter o coma.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <p
-            v-if="totalProcessingTime > 0"
-            class="text-center text-xs text-gray-400"
-          >
-            Tiempo total: {{ formatTime(totalProcessingTime) }}
-          </p>
-        </div>
-      </aside>
-    </div>
-
-    <!-- Side Panel Preview -->
-    <Transition name="slide">
-      <div
-        v-if="previewFile"
-        class="fixed right-0 top-0 z-40 flex h-full flex-col border-l border-gray-200 bg-white shadow-2xl"
-        :style="{ width: `${previewWidth}px` }"
-      >
-        <div
-          class="group absolute left-0 top-0 z-50 h-full w-1.5 -translate-x-1/2 cursor-col-resize"
-          @mousedown="startPreviewResize"
-          :title="`Arrastra para redimensionar · ${previewWidth}px`"
-        >
-          <div
-            class="h-full w-full transition-colors"
-            :class="
-              isResizingPreview
-                ? 'bg-emerald-400/70'
-                : 'bg-transparent group-hover:bg-emerald-400/40'
-            "
-          ></div>
-        </div>
-        <div
-          class="flex items-center justify-between border-b border-gray-200 px-4 py-4"
-        >
-          <h3 class="truncate text-base font-semibold text-gray-900">
-            {{ previewFile.name }}
-          </h3>
-          <button
-            @click="closePreview"
-            class="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+            class="flex items-center gap-2 border-t border-gray-100 px-4 py-3 text-sm text-gray-700"
           >
             <svg
-              class="h-5 w-5"
+              class="h-4 w-4 text-gray-400"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -1621,90 +1162,528 @@
               <path
                 stroke-linecap="round"
                 stroke-linejoin="round"
-                stroke-width="2"
-                d="M6 18L18 6M6 6l12 12"
+                stroke-width="1.8"
+                d="M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.5-2.5 2.5-15 0-18m0 18c-2.5-2.5-2.5-15 0-18M3 12h18"
               />
             </svg>
+            {{ files.length }} entradas escaneadas
+          </div>
+        </div>
+
+        <!-- Multipage breakdown -->
+        <div
+          v-if="multipageDocuments.length"
+          class="rounded-xl border border-gray-200 bg-white px-4 py-3"
+        >
+          <p class="mb-2 text-xs font-medium text-gray-400">
+            Documentos multipágina
+          </p>
+          <ul class="space-y-1.5">
+            <li
+              v-for="doc in multipageDocuments"
+              :key="doc.id"
+              class="flex items-center justify-between gap-2 text-xs text-gray-600"
+            >
+              <span class="truncate">{{ doc.name }}</span>
+              <span
+                class="flex-shrink-0 rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-500"
+                >{{ doc.pages }} entradas</span
+              >
+            </li>
+          </ul>
+        </div>
+
+        <!-- Actions -->
+        <div class="space-y-2 rounded-xl border border-gray-200 bg-white p-3">
+          <button
+            @click="processAll"
+            :disabled="
+              !canScan ||
+              processing ||
+              batchLimit.isLimited.value ||
+              files.every((f) => f.status !== 'pending' || f.reviewLater)
+            "
+            class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            :title="
+              !canScan
+                ? 'Selecciona cliente y documentos primero'
+                : batchLimit.isLimited.value
+                  ? `Límite alcanzado - espera ${batchLimit.label.value}`
+                  : 'Procesar archivos pendientes con IA'
+            "
+          >
+            <template v-if="processing">Procesando...</template>
+            <template v-else-if="batchLimit.isLimited.value">
+              Enfriamiento · {{ batchLimit.label.value }}
+            </template>
+            <template v-else>Procesar</template>
+          </button>
+          <button
+            @click="canScan && fileInput?.click()"
+            :disabled="!canScan"
+            class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cargar más documentos
+          </button>
+          <button
+            @click="clearFiles"
+            class="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
+          >
+            Descartar todos
+          </button>
+          <button
+            v-if="baseExportableFilesCount > 0"
+            @click="openSuplidorSummary"
+            class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="exportableFilesCount === 0"
+            :title="
+              exportableFilesCount === 0
+                ? 'Ninguna fila coincide con los filtros de exportación'
+                : 'Descargar Excel'
+            "
+          >
+            Descargar Excel
+            <span class="ml-1 font-normal text-gray-400"
+              >({{ exportableFilesCount }})</span
+            >
           </button>
         </div>
 
-        <div class="flex-1 overflow-auto p-4">
-          <div
-            v-if="isImageFile(previewFile)"
-            class="overflow-hidden rounded-xl bg-gray-100"
-          >
-            <img
-              :src="previewUrl"
-              :alt="previewFile.name"
-              class="h-auto w-full object-contain"
-              @load="onPreviewImageLoad"
-              @error="onPreviewImageError"
-            />
+        <!-- NCF strip options for Excel export -->
+        <div
+          class="space-y-3 rounded-xl border border-gray-200 bg-white px-4 py-3"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-sm font-medium text-gray-900">
+                Remover nomenclaturas NCF
+              </p>
+              <p class="mt-0.5 text-xs text-gray-400">
+                Al exportar, quita del inicio del valor las series tipadas (ej.
+                B01 → 00222157). Los ceros que queden se conservan.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="stripNcfEnabled"
+              class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+              :class="stripNcfEnabled ? 'bg-emerald-600' : 'bg-gray-200'"
+              @click="stripNcfEnabled = !stripNcfEnabled"
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"
+                :class="stripNcfEnabled ? 'translate-x-5' : 'translate-x-0'"
+              />
+            </button>
           </div>
 
-          <div
-            v-else-if="isPdfFile(previewFile)"
-            class="flex h-full flex-col overflow-hidden rounded-xl bg-gray-100"
-          >
-            <iframe
-              :src="previewUrl"
-              :title="previewFile.name"
-              class="w-full flex-1 bg-white"
-              style="min-height: 70vh"
-            ></iframe>
-            <p class="border-t border-gray-200 px-3 py-2 text-xs text-gray-400">
-              Los PDF normalmente se dividen en una fila por página al subir.
-            </p>
-          </div>
+          <div v-if="stripNcfEnabled" class="space-y-3">
+            <div class="relative">
+              <label class="mb-1.5 block text-xs font-medium text-gray-500">
+                Columnas del Excel
+              </label>
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-left text-sm text-gray-700 transition hover:border-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                @click="
+                  stripNcfColumnDropdownOpen = !stripNcfColumnDropdownOpen
+                "
+              >
+                <span
+                  v-if="stripNcfColumns.length"
+                  class="flex flex-wrap gap-1"
+                >
+                  <span
+                    v-for="key in stripNcfColumns"
+                    :key="key"
+                    class="inline-flex rounded-md bg-gray-100 px-1.5 py-0.5 text-xs font-semibold text-gray-700"
+                  >
+                    {{ stripNcfColumnLabel(key) }}
+                  </span>
+                </span>
+                <span v-else class="text-gray-400">Selecciona columnas…</span>
+                <svg
+                  class="h-4 w-4 flex-shrink-0 text-gray-400 transition"
+                  :class="{ 'rotate-180': stripNcfColumnDropdownOpen }"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </button>
+              <div
+                v-if="stripNcfColumnDropdownOpen"
+                class="absolute left-0 right-0 z-20 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+              >
+                <label
+                  v-for="col in STRIP_NCF_COLUMN_OPTIONS"
+                  :key="col.key"
+                  class="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <input
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    :checked="stripNcfColumns.includes(col.key)"
+                    @change="toggleStripNcfColumn(col.key)"
+                  />
+                  <span>{{ col.label }}</span>
+                </label>
+              </div>
+            </div>
 
-          <div v-else class="rounded-xl bg-gray-100 p-8 text-center">
-            <p class="text-sm text-gray-600">{{ previewFile.name }}</p>
-            <p class="mt-2 text-xs text-gray-400">
-              Vista previa no disponible.
-            </p>
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-gray-500">
+                Nomenclaturas
+              </label>
+              <div
+                class="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 transition focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/40"
+                @click="stripNcfInput?.focus()"
+              >
+                <span
+                  v-for="prefix in stripNcfPrefixes"
+                  :key="prefix"
+                  class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-gray-700"
+                >
+                  {{ prefix }}
+                  <button
+                    type="button"
+                    class="rounded text-gray-400 hover:text-gray-700"
+                    :title="`Quitar ${prefix}`"
+                    @click.stop="removeStripNcfPrefix(prefix)"
+                  >
+                    ×
+                  </button>
+                </span>
+                <input
+                  ref="stripNcfInput"
+                  v-model="stripNcfDraft"
+                  type="text"
+                  class="min-w-[5rem] flex-1 border-0 bg-transparent px-1 py-0.5 font-mono text-xs text-gray-700 outline-none placeholder:font-sans placeholder:text-gray-400"
+                  placeholder="Ej: B01 y Enter"
+                  @keydown="onStripNcfDraftKeydown"
+                  @blur="commitStripNcfDraft"
+                />
+              </div>
+              <p class="mt-1 text-[11px] text-gray-400">
+                Escribe la serie (B01, E31…) y pulsa Enter o coma.
+              </p>
+            </div>
           </div>
         </div>
-      </div>
-    </Transition>
 
-    <!-- Leave confirmation: scan progress is not persisted -->
+        <!-- Include-only filter for Excel export -->
+        <div
+          class="space-y-3 rounded-xl border border-gray-200 bg-white px-4 py-3"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-sm font-medium text-gray-900">
+                Solo valores coincidentes
+              </p>
+              <p class="mt-0.5 text-xs text-gray-400">
+                Exporta únicamente las filas cuyo valor en la columna elegida
+                coincide con los tipados.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="exportIncludeEnabled"
+              class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+              :class="exportIncludeEnabled ? 'bg-emerald-600' : 'bg-gray-200'"
+              @click="exportIncludeEnabled = !exportIncludeEnabled"
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"
+                :class="
+                  exportIncludeEnabled ? 'translate-x-5' : 'translate-x-0'
+                "
+              />
+            </button>
+          </div>
+
+          <div v-if="exportIncludeEnabled" class="space-y-3">
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-gray-500">
+                Columna
+              </label>
+              <select
+                v-model="exportIncludeColumn"
+                class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+              >
+                <option
+                  v-for="col in EXPORT_VALUE_FILTER_COLUMNS"
+                  :key="col.key"
+                  :value="col.key"
+                >
+                  {{ col.label }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-gray-500">
+                Valores a incluir
+              </label>
+              <div
+                class="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 transition focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/40"
+                @click="exportIncludeInput?.focus()"
+              >
+                <span
+                  v-for="value in exportIncludeValues"
+                  :key="value"
+                  class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-gray-700"
+                >
+                  {{ value }}
+                  <button
+                    type="button"
+                    class="rounded text-gray-400 hover:text-gray-700"
+                    :title="`Quitar ${value}`"
+                    @click.stop="removeExportIncludeValue(value)"
+                  >
+                    ×
+                  </button>
+                </span>
+                <input
+                  ref="exportIncludeInput"
+                  v-model="exportIncludeDraft"
+                  type="text"
+                  class="min-w-[5rem] flex-1 border-0 bg-transparent px-1 py-0.5 font-mono text-xs text-gray-700 outline-none placeholder:font-sans placeholder:text-gray-400"
+                  placeholder="Ej: 122029818"
+                  @keydown="onExportIncludeDraftKeydown"
+                  @blur="commitExportIncludeDraft"
+                />
+              </div>
+              <p class="mt-1 text-[11px] text-gray-400">
+                Escribe el valor y pulsa Enter o coma.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Exclude filter for Excel export -->
+        <div
+          class="space-y-3 rounded-xl border border-gray-200 bg-white px-4 py-3"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-sm font-medium text-gray-900">
+                Excluir valores coincidentes
+              </p>
+              <p class="mt-0.5 text-xs text-gray-400">
+                Omite del Excel las filas cuyo valor en la columna elegida
+                coincide con los tipados.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="exportExcludeEnabled"
+              class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+              :class="exportExcludeEnabled ? 'bg-emerald-600' : 'bg-gray-200'"
+              @click="exportExcludeEnabled = !exportExcludeEnabled"
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"
+                :class="
+                  exportExcludeEnabled ? 'translate-x-5' : 'translate-x-0'
+                "
+              />
+            </button>
+          </div>
+
+          <div v-if="exportExcludeEnabled" class="space-y-3">
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-gray-500">
+                Columna
+              </label>
+              <select
+                v-model="exportExcludeColumn"
+                class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+              >
+                <option
+                  v-for="col in EXPORT_VALUE_FILTER_COLUMNS"
+                  :key="col.key"
+                  :value="col.key"
+                >
+                  {{ col.label }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-gray-500">
+                Valores a excluir
+              </label>
+              <div
+                class="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 transition focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/40"
+                @click="exportExcludeInput?.focus()"
+              >
+                <span
+                  v-for="value in exportExcludeValues"
+                  :key="value"
+                  class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-gray-700"
+                >
+                  {{ value }}
+                  <button
+                    type="button"
+                    class="rounded text-gray-400 hover:text-gray-700"
+                    :title="`Quitar ${value}`"
+                    @click.stop="removeExportExcludeValue(value)"
+                  >
+                    ×
+                  </button>
+                </span>
+                <input
+                  ref="exportExcludeInput"
+                  v-model="exportExcludeDraft"
+                  type="text"
+                  class="min-w-[5rem] flex-1 border-0 bg-transparent px-1 py-0.5 font-mono text-xs text-gray-700 outline-none placeholder:font-sans placeholder:text-gray-400"
+                  placeholder="Ej: 122029818"
+                  @keydown="onExportExcludeDraftKeydown"
+                  @blur="commitExportExcludeDraft"
+                />
+              </div>
+              <p class="mt-1 text-[11px] text-gray-400">
+                Escribe el valor y pulsa Enter o coma.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <p
+          v-if="totalProcessingTime > 0"
+          class="text-center text-xs text-gray-400"
+        >
+          Tiempo total: {{ formatTime(totalProcessingTime) }}
+        </p>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Side Panel Preview -->
+  <Transition name="slide">
     <div
-      v-if="leaveConfirmOpen"
-      class="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="leave-confirm-title"
+      v-if="previewFile"
+      class="fixed right-0 top-0 z-40 flex h-full flex-col border-l border-gray-200 bg-white shadow-2xl"
+      :style="{ width: `${previewWidth}px` }"
     >
       <div
-        class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl"
+        class="group absolute left-0 top-0 z-50 h-full w-1.5 -translate-x-1/2 cursor-col-resize"
+        @mousedown="startPreviewResize"
+        :title="`Arrastra para redimensionar · ${previewWidth}px`"
       >
-        <h2
-          id="leave-confirm-title"
-          class="text-lg font-semibold text-gray-900"
+        <div
+          class="h-full w-full transition-colors"
+          :class="
+            isResizingPreview
+              ? 'bg-emerald-400/70'
+              : 'bg-transparent group-hover:bg-emerald-400/40'
+          "
+        ></div>
+      </div>
+      <div
+        class="flex items-center justify-between border-b border-gray-200 px-4 py-4"
+      >
+        <h3 class="truncate text-base font-semibold text-gray-900">
+          {{ previewFile.name }}
+        </h3>
+        <button
+          @click="closePreview"
+          class="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
         >
-          ¿Salir sin guardar?
-        </h2>
-        <p class="mt-2 text-sm text-gray-600">
-          Ya procesaste documentos en esta sesión. El progreso del escaneo
-          <strong class="font-semibold text-gray-800">no se ha almacenado</strong>
-          y se perderá si sales o recargas la página.
-        </p>
-        <div class="mt-6 flex justify-end gap-3">
-          <button
-            type="button"
-            class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-            @click="cancelLeave"
+          <svg
+            class="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
           >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
-            @click="confirmLeave"
-          >
-            Salir de todos modos
-          </button>
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-auto p-4">
+        <div
+          v-if="isImageFile(previewFile)"
+          class="overflow-hidden rounded-xl bg-gray-100"
+        >
+          <img
+            :src="previewUrl"
+            :alt="previewFile.name"
+            class="h-auto w-full object-contain"
+            @load="onPreviewImageLoad"
+            @error="onPreviewImageError"
+          />
         </div>
+
+        <div
+          v-else-if="isPdfFile(previewFile)"
+          class="flex h-full flex-col overflow-hidden rounded-xl bg-gray-100"
+        >
+          <iframe
+            :src="previewUrl"
+            :title="previewFile.name"
+            class="w-full flex-1 bg-white"
+            style="min-height: 70vh"
+          ></iframe>
+          <p class="border-t border-gray-200 px-3 py-2 text-xs text-gray-400">
+            Los PDF normalmente se dividen en una fila por página al subir.
+          </p>
+        </div>
+
+        <div v-else class="rounded-xl bg-gray-100 p-8 text-center">
+          <p class="text-sm text-gray-600">{{ previewFile.name }}</p>
+          <p class="mt-2 text-xs text-gray-400">Vista previa no disponible.</p>
+        </div>
+      </div>
+    </div>
+  </Transition>
+
+  <!-- Leave confirmation: scan progress is not persisted -->
+  <div
+    v-if="leaveConfirmOpen"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="leave-confirm-title"
+  >
+    <div
+      class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl"
+    >
+      <h2 id="leave-confirm-title" class="text-lg font-semibold text-gray-900">
+        ¿Salir sin guardar?
+      </h2>
+      <p class="mt-2 text-sm text-gray-600">
+        Ya procesaste documentos en esta sesión. El progreso del escaneo
+        <strong class="font-semibold text-gray-800">no se ha almacenado</strong>
+        y se perderá si sales o recargas la página.
+      </p>
+      <div class="mt-6 flex justify-end gap-3">
+        <button
+          type="button"
+          class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+          @click="cancelLeave"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
+          @click="confirmLeave"
+        >
+          Salir de todos modos
+        </button>
       </div>
     </div>
   </div>
@@ -1716,19 +1695,32 @@
     @click.self="showSuplidorSummary = false"
   >
     <div class="w-full max-w-lg rounded-xl bg-white shadow-xl">
-      <div class="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+      <div
+        class="flex items-center justify-between border-b border-gray-100 px-6 py-4"
+      >
         <div>
           <h2 class="text-base font-semibold text-gray-900">
             Resumen de Suplidores
           </h2>
           <p class="mt-0.5 text-sm text-gray-500">
-            <span class="font-medium text-gray-700">{{ suplidorSummaryRows.length }}</span>
-            {{ suplidorSummaryRows.length === 1 ? "suplidor único" : "suplidores únicos" }} en este archivo.
+            <span class="font-medium text-gray-700">{{
+              suplidorSummaryRows.length
+            }}</span>
+            {{
+              suplidorSummaryRows.length === 1
+                ? "suplidor único"
+                : "suplidores únicos"
+            }}
+            en este archivo.
             <span
-              v-if="suplidorSummaryRows.some(s => !s.registered_on_platform)"
+              v-if="suplidorSummaryRows.some((s) => !s.registered_on_platform)"
               class="text-amber-600"
             >
-              {{ suplidorSummaryRows.filter(s => !s.registered_on_platform).length }} no registrados en la plataforma.
+              {{
+                suplidorSummaryRows.filter((s) => !s.registered_on_platform)
+                  .length
+              }}
+              no registrados en la plataforma.
             </span>
           </p>
         </div>
@@ -1737,15 +1729,27 @@
           class="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
           @click="showSuplidorSummary = false"
         >
-          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          <svg
+            class="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M6 18L18 6M6 6l12 12"
+            />
           </svg>
         </button>
       </div>
 
       <div class="max-h-72 overflow-y-auto">
         <table class="w-full text-left text-sm">
-          <thead class="sticky top-0 border-b border-gray-100 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500">
+          <thead
+            class="sticky top-0 border-b border-slate-100 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500"
+          >
             <tr>
               <th class="px-5 py-2.5">Documento</th>
               <th class="px-5 py-2.5">Nombre</th>
@@ -1777,7 +1781,11 @@
                     fill="currentColor"
                     viewBox="0 0 20 20"
                   >
-                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                    <path
+                      fill-rule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clip-rule="evenodd"
+                    />
                   </svg>
                   <svg
                     v-else
@@ -1786,14 +1794,24 @@
                     stroke="currentColor"
                     viewBox="0 0 24 24"
                   >
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v4m0 4h.01" />
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2.5"
+                      d="M12 9v4m0 4h.01"
+                    />
                   </svg>
-                  {{ s.registered_on_platform ? "Registrado" : "No registrado" }}
+                  {{
+                    s.registered_on_platform ? "Registrado" : "No registrado"
+                  }}
                 </span>
               </td>
             </tr>
             <tr v-if="suplidorSummaryRows.length === 0">
-              <td colspan="3" class="px-5 py-8 text-center text-sm text-gray-400">
+              <td
+                colspan="3"
+                class="px-5 py-8 text-center text-sm text-gray-400"
+              >
                 No se detectaron suplidores en las filas exportables.
               </td>
             </tr>
@@ -1808,7 +1826,9 @@
         {{ suplidorSaveError }}
       </p>
 
-      <div class="flex items-center justify-between border-t border-gray-100 px-6 py-4">
+      <div
+        class="flex items-center justify-between border-t border-gray-100 px-6 py-4"
+      >
         <p class="text-xs text-gray-400">
           Los suplidores nuevos se guardarán en la base de datos al descargar.
         </p>
@@ -1844,7 +1864,8 @@ const API_BASE = useApiBase();
 const { list: listClients } = useClients();
 const { listByClient } = useClientDocuments();
 const { listByClient: listBusinessRulesByClient } = useClientBusinessRules();
-const { upsertFromScan, listByClient: listSuplidoresByClient } = useClientSuplidores();
+const { upsertFromScan, listByClient: listSuplidoresByClient } =
+  useClientSuplidores();
 
 const clients = ref([]);
 const clientsLoading = ref(false);
@@ -2088,13 +2109,11 @@ const selectedFileIds = ref(new Set());
 
 const columns = [
   "#",
-  "File Name",
-  "Type",
+  "Documento",
   "Status",
   "Score",
   "Processing Time",
   "Nombre",
-  "Documento",
   "NCF",
   "NCF Afectado",
   "Tipo de Suplidor",
@@ -2109,6 +2128,7 @@ const columns = [
   "Forma de Pago",
   "Concepto Id",
   "Tipo de Pago Id",
+  "File Name",
   "Preview",
   "Acciones",
 ];
@@ -2181,9 +2201,7 @@ const loadStripNcfSettings = () => {
     if (typeof parsed?.enabled === "boolean") {
       stripNcfEnabled.value = parsed.enabled;
     }
-    const validColumns = new Set(
-      STRIP_NCF_COLUMN_OPTIONS.map((c) => c.key),
-    );
+    const validColumns = new Set(STRIP_NCF_COLUMN_OPTIONS.map((c) => c.key));
     // Migrate legacy single `column` string → `columns` array.
     const rawColumns = Array.isArray(parsed?.columns)
       ? parsed.columns
@@ -2198,7 +2216,11 @@ const loadStripNcfSettings = () => {
       const cleaned = [
         ...new Set(
           parsed.prefixes
-            .map((p) => String(p || "").replace(/\s+/g, "").toUpperCase())
+            .map((p) =>
+              String(p || "")
+                .replace(/\s+/g, "")
+                .toUpperCase(),
+            )
             .filter(Boolean),
         ),
       ];
@@ -2302,7 +2324,11 @@ const stripNomenclaturesFromValue = (value, prefixes) => {
 
   // Longer prefixes first so "B01" wins over "B0", "E31" over "E3", etc.
   const sorted = [...prefixes]
-    .map((p) => String(p || "").replace(/\s+/g, "").toUpperCase())
+    .map((p) =>
+      String(p || "")
+        .replace(/\s+/g, "")
+        .toUpperCase(),
+    )
     .filter(Boolean)
     .sort((a, b) => b.length - a.length);
 
@@ -2325,9 +2351,7 @@ const applyStripNcfForColumn = (fieldKey, value) => {
     !stripNcfColumns.value.includes(fieldKey) ||
     !stripNcfPrefixes.value.length
   ) {
-    return fieldKey === "ncf" || fieldKey === "ncf_afectado"
-      ? cleaned
-      : value;
+    return fieldKey === "ncf" || fieldKey === "ncf_afectado" ? cleaned : value;
   }
   const stripped = stripNomenclaturesFromValue(value, stripNcfPrefixes.value);
   // Non-NCF columns keep original casing/spacing aside from the strip itself.
@@ -2390,9 +2414,7 @@ const fileMatchesExportValues = (file, columnKey, values) => {
   );
   if (!cell) return false;
   const set = new Set(
-    values
-      .map((v) => normalizeExportFilterValue(columnKey, v))
-      .filter(Boolean),
+    values.map((v) => normalizeExportFilterValue(columnKey, v)).filter(Boolean),
   );
   return set.has(cell);
 };
@@ -2433,9 +2455,7 @@ const loadExportValueFilterSettings = () => {
     const raw = window.localStorage.getItem(EXPORT_VALUE_FILTER_SETTINGS_KEY);
     if (!raw) return;
     const parsed = JSON.parse(raw);
-    const validColumns = new Set(
-      EXPORT_VALUE_FILTER_COLUMNS.map((c) => c.key),
-    );
+    const validColumns = new Set(EXPORT_VALUE_FILTER_COLUMNS.map((c) => c.key));
 
     if (typeof parsed?.include?.enabled === "boolean") {
       exportIncludeEnabled.value = parsed.include.enabled;
@@ -2446,7 +2466,9 @@ const loadExportValueFilterSettings = () => {
     if (Array.isArray(parsed?.include?.values)) {
       exportIncludeValues.value = [
         ...new Set(
-          parsed.include.values.map((v) => String(v || "").trim()).filter(Boolean),
+          parsed.include.values
+            .map((v) => String(v || "").trim())
+            .filter(Boolean),
         ),
       ];
     }
@@ -2460,7 +2482,9 @@ const loadExportValueFilterSettings = () => {
     if (Array.isArray(parsed?.exclude?.values)) {
       exportExcludeValues.value = [
         ...new Set(
-          parsed.exclude.values.map((v) => String(v || "").trim()).filter(Boolean),
+          parsed.exclude.values
+            .map((v) => String(v || "").trim())
+            .filter(Boolean),
         ),
       ];
     }
@@ -2868,9 +2892,7 @@ const multipageDocuments = computed(() =>
   sourceDocuments.value.filter((d) => d.pages > 1),
 );
 
-const activeFiles = computed(() =>
-  files.value.filter((f) => !f.reviewLater),
-);
+const activeFiles = computed(() => files.value.filter((f) => !f.reviewLater));
 const reviewLaterFiles = computed(() =>
   files.value.filter((f) => f.reviewLater),
 );
@@ -3693,7 +3715,10 @@ const processAll = async () => {
           JSON.stringify(tipoDePagoCatalogPayload.value),
         );
       }
-      formData.append("concepto_document_comment", conceptoDocumentComment.value);
+      formData.append(
+        "concepto_document_comment",
+        conceptoDocumentComment.value,
+      );
       formData.append(
         "tipo_de_pago_document_comment",
         tipoDePagoDocumentComment.value,
@@ -3820,7 +3845,9 @@ async function buildSuplidorSummary() {
   const uniqueMap = new Map();
   for (const f of exportable) {
     const d = f.editableData;
-    const doc = String(d.documento || "").replace(/\D/g, "").slice(0, 20);
+    const doc = String(d.documento || "")
+      .replace(/\D/g, "")
+      .slice(0, 20);
     const nombre = (d.nombre || "").trim();
     if (!nombre) continue;
     const key = doc || nombre;
@@ -3842,10 +3869,14 @@ async function buildSuplidorSummary() {
     // non-blocking — summary still shown without registered status
   }
   const registeredDocs = new Set(
-    existing.filter((s) => s.registered_on_platform).map((s) => s.documento ?? "")
+    existing
+      .filter((s) => s.registered_on_platform)
+      .map((s) => s.documento ?? ""),
   );
   const registeredNames = new Set(
-    existing.filter((s) => s.registered_on_platform && !s.documento).map((s) => s.nombre)
+    existing
+      .filter((s) => s.registered_on_platform && !s.documento)
+      .map((s) => s.nombre),
   );
 
   return [...uniqueMap.values()].map((s) => ({
@@ -3906,7 +3937,10 @@ const downloadExcel = async () => {
       const d = f.editableData;
       return {
         filename: d.filename,
-        nombre: applyStripNcfForColumn("nombre", (d.nombre || "").slice(0, 255)),
+        nombre: applyStripNcfForColumn(
+          "nombre",
+          (d.nombre || "").slice(0, 255),
+        ),
         documento: applyStripNcfForColumn(
           "documento",
           String(d.documento || "").replace(/\D/g, ""),

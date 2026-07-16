@@ -358,15 +358,15 @@ def save_workbook_as_xls(wb, xlsx_path: Path = OUTPUT_FILE, xls_path: Path = OUT
     return convert_xlsx_to_xls(xlsx_path, xls_path)
 
 
-SYSTEM_PROMPT = """Tu eres un contador educado y radicado en republica dominicana, te encargas de procesar recibos de pago y facturas de proveedores para luego ingresarlos en el sistema de contabilidad.
+SYSTEM_PROMPT = """Tu eres un contador educado y radicado en Republica Dominicana, experto en temas fiscales, te encargas de procesar recibos de pago y facturas de proveedores para luego ingresarlos en el sistema de contabilidad.
 
     Tu tarea es extraer la siguiente informacion del recibo/factura y retornarla en formato JSON para ser utilizado en el sistema de contabilidad:
 
     - nombre: El nombre o razon social del suplidor/proveedor que emite la factura (quien vende, no quien compra). Normalmente aparece en la parte superior del recibo/factura, junto al logo o encabezado. Texto abierto, maximo 255 caracteres.
 
-    - documento: El RNC/cedula del suplidor. SOLO digitos, sin guiones ni caracteres especiales (ej: "101702176", "00200078964", "987356102"). Si aparece como "101-70217-6", devolver "101702176".
+    - documento: El RNC/cedula(numero de identifcacion de la persona)/numero de pasaporte del suplidor. SOLO digitos, sin guiones ni caracteres especiales (ej: "101702176", "00200078964", "987356102"). Si aparece como "101-70217-6", devolver "101702176".
 
-    - ncf: El NCF (Numero de Comprobante Fiscal). Es un codigo alfanumerico que empieza con una letra (B, E, etc.) seguido de digitos. Ejemplo: E310001987518, B0100014525. Si el valor viene con ceros a la izquierda ANTES de B01 o B02 (ej: "0000000B0100222157"), quita esos ceros y devolver "B0100222157". NO quites ceros internos ni ceros de series E31 u otras (ej: "E310000029838" se deja tal cual).
+    - ncf: El NCF (Numero de Comprobante Fiscal). Es un codigo alfanumerico que empieza con una letra (B, E, etc.) seguido de digitos. Ejemplo: E310001987518, B0100014525. Si el valor viene con ceros a la izquierda ANTES de B01 o B02 (ej: "0000000B0100222157"), quita esos ceros y devolver "B0100222157". El B0# puede llegar hasta B09 NO quites ceros internos ni ceros de series E31 u otras (ej: "E310000029838" se deja tal cual).
 
     - ncf_afectado: NCF modificado/afectado cuando el comprobante es nota de credito (B03) o nota de debito (B04). Maximo 11 caracteres. Si el NCF NO es B03/B04, dejar "".
 
@@ -394,7 +394,7 @@ SYSTEM_PROMPT = """Tu eres un contador educado y radicado en republica dominican
     10-Adquisicion de activos
     11-Gastos de seguros
 
-    - descripcion: Descripcion del tipo de operacion (ej: "COMPRA", "GASOLINA", "MATERIALES"). Obligatoria. Maximo 200 caracteres.
+    - descripcion: Descripcion o comentario del tipo de operacion (ej: "compra de enceres para la casa", "pago de hoteles", "Compra de vegetales",  "COMPRA", "GASOLINA", "MATERIALES", etc). Obligatoria. Maximo 200 caracteres.
 
     - fecha: Fecha de la transaccion como TEXTO en formato DD/MM/AAAA con dia y mes siempre de 2 digitos (ej: "08/06/2026", "01/11/2025"). Nunca uses "8/06/2026".
 
@@ -422,6 +422,17 @@ SYSTEM_PROMPT = """Tu eres un contador educado y radicado en republica dominican
     + MIXTO
 
     - score: Asigna un score de 1 a 3 para calificar que tan seguro estas de la informacion extraida. 3 = muy seguro, 2 = algo seguro, 1 = poco seguro.
+
+    ANTES DE ARROJAR EL EXCEL DEBEN SER VALIDADOS ESTOS DATOS 100%, EN CASO DE NO TENER LA CERTEZA  el score debe ser un 2. Si mas de 1 de estos elementos no es 100% certero, se debe asignar un score de 1 de fiabilidad.
+
+    1. Si usa RNC, Confirmar RNC (DEBE TENER 9 CARACTERES) – PERSONA JURIDICA
+    2. Si es cedula, Confirmar CEDULA (DEBE TENER 11 CARACTERES) – PERSONA FISICA
+    3. NCF (E31- DEBEN TENER 13 DIGITOS Y LOS B0(numero entero) - DEBEN TENER 11)Validar con extra cuidado.
+
+    **Revisar bien la foto por estos valores**  
+    4. MONTO: puede aparecer en campos como total, sub-total, Total (sin itbis), Neto, Sub-total excento, etc.
+    5. ITBIS
+    6. FECHA: Solo se toma la fecha de emision de la factura, se debe ignorar casos similares 'Valido hasta','NFC Vence', 'Fecha', 'Fecha limite pago'.
 
     Retornar la informacion en formato JSON con las siguientes claves: nombre, documento, ncf, ncf_afectado, tipo_de_suplidor, tipo_de_gasto, descripcion, fecha, monto_en_servicios, monto_en_bienes, itbis, selectivo, moneda, metodo_de_pago, score.
     """
@@ -821,6 +832,7 @@ def _build_tipo_de_gasto_context_block(
         "'tipo_de_gasto' (usa esto UNICAMENTE como ayuda para decidir cual "
         "de las 11 opciones fijas de tipo_de_gasto (arriba) aplica mejor; "
         "NUNCA inventes un valor nuevo ni copies este texto como respuesta "
+        "Si no estas 100% seguro de la categoria de tipo de gasto, influir en tu decision para el Score de fiabilidad"
         "- el resultado debe seguir siendo EXACTAMENTE uno de los 11 "
         "valores fijos listados):\n" + "\n".join(lines)
     )
@@ -944,55 +956,6 @@ EXCEL_INT_FIELDS = ["concepto_id", "tipo_de_pago_id"]
 # the destination CRM validates it as a date type, so it must be written as
 # an actual date serial, not a "DD/MM/YYYY" string.
 EXCEL_DATE_FIELDS = ["fecha"]
-
-
-def _build_data_columns(ws) -> dict:
-    """Map logical fields to 1-based template column indices from the header row."""
-    column_map = {}
-    for col_idx in range(1, (ws.max_column or 0) + 1):
-        header = ws.cell(row=1, column=col_idx).value
-        if header:
-            column_map[str(header).lower().strip()] = col_idx
-
-    data_columns = {}
-    for field, possible_headers in EXCEL_FIELD_MAPPINGS.items():
-        cols = []
-        for header_name in possible_headers:
-            col = column_map.get(header_name.lower().strip())
-            if col is not None and col not in cols:
-                cols.append(col)
-        if cols:
-            data_columns[field] = cols
-    return data_columns
-
-
-def _write_excel_row(ws, row: int, data: dict, data_columns: dict):
-    """Write one normalized receipt row into the template sheet."""
-    prepared = prepare_export_row(data)
-
-    for field in EXCEL_TEXT_FIELDS:
-        for col in data_columns.get(field, []):
-            ws.cell(row=row, column=col, value=prepared.get(field, ""))
-
-    for field in EXCEL_NUMERIC_FIELDS:
-        cols = data_columns.get(field, [])
-        if not cols:
-            continue
-        val = float(prepared.get(field, 0.0) or 0.0)
-        for col in cols:
-            ws.cell(row=row, column=col, value=val)
-
-    # Integer ERP ids (Concepto Id / Tipo de Pago Id) resolved from the
-    # client-specific catalog. Left blank (None) when nothing matched, rather
-    # than defaulting to 0, since 0 can be a legitimate ERP id.
-    for field in EXCEL_INT_FIELDS:
-        cols = data_columns.get(field, [])
-        if not cols:
-            continue
-        val = prepared.get(field)
-        for col in cols:
-            ws.cell(row=row, column=col, value=val)
-
 
 def _strip_markdown_fences(text: str) -> str:
     """Remove ```json ... ``` fences that Gemini sometimes adds."""

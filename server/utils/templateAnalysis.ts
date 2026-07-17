@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import { getExtension } from "~/server/utils/templateReferences";
 
 // SheetJS is loaded at runtime via createRequire instead of a static import.
@@ -6,8 +8,29 @@ import { getExtension } from "~/server/utils/templateReferences";
 // "Dynamic require ... is not supported" when the package gets inlined into
 // the server's ESM bundle. createRequire keeps it external so Node loads it
 // natively, where the dynamic require works fine.
-const require = createRequire(import.meta.url);
-const XLSX = require("xlsx") as typeof import("xlsx");
+//
+// Do NOT base createRequire on import.meta.url: Nitro rewrites it to
+// file:///_entry.js, which makes Node look for modules next to `/` and crash
+// with MODULE_NOT_FOUND in production. Resolve from a real package.json path
+// instead (Nitro output in prod, project root in dev).
+function requireSheetJs(): typeof import("xlsx") {
+  const candidates = [
+    join(process.cwd(), ".output/server/package.json"),
+    join(process.cwd(), "package.json"),
+  ];
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    try {
+      return createRequire(candidate)("xlsx") as typeof import("xlsx");
+    } catch {
+      // Try the next candidate (e.g. stale .output after uninstall).
+    }
+  }
+  throw new Error(
+    'Cannot find module "xlsx". Run npm install, then rebuild if deploying.',
+  );
+}
+const XLSX = requireSheetJs();
 
 // Result of analyzing a reference spreadsheet with Gemini. Mirrors what the
 // "Crear plantilla" form needs to populate its columns + summary sidebar.

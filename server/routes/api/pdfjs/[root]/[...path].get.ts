@@ -14,12 +14,29 @@ const CONTENT_TYPES: Record<string, string> = {
   ".unicode": "application/octet-stream",
 };
 
+function resolveAsset(root: string, safePath: string): string | null {
+  const candidates = [
+    // Production build output (Docker only ships .output).
+    join(process.cwd(), ".output/public/api/pdfjs", root, safePath),
+    // Local public/ copy if present.
+    join(process.cwd(), "public/api/pdfjs", root, safePath),
+    // Dev / full installs: read straight from the package.
+    join(process.cwd(), "node_modules/pdfjs-dist", root, safePath),
+  ];
+  for (const filePath of candidates) {
+    if (existsSync(filePath) && statSync(filePath).isFile()) {
+      return filePath;
+    }
+  }
+  return null;
+}
+
 /**
- * Serve pdf.js decoder assets from node_modules so client-side PDF rasterization
- * can decode scanned JBIG2/JPEG2000 pages without shipping copies in /public.
+ * Serve pdf.js decoder assets so client-side PDF rasterization can decode
+ * scanned JBIG2/JPEG2000 pages.
  *
- * GET /api/pdfjs/wasm/openjpeg.wasm
- * GET /api/pdfjs/cmaps/Identity-H.bcmap
+ * GET /api/pdfjs/wasm/jbig2.wasm
+ * GET /api/pdfjs/cmaps/...
  * GET /api/pdfjs/standard_fonts/...
  */
 export default defineEventHandler((event) => {
@@ -39,15 +56,8 @@ export default defineEventHandler((event) => {
     throw createError({ statusCode: 400, statusMessage: "Invalid path" });
   }
 
-  const filePath = join(
-    process.cwd(),
-    "node_modules",
-    "pdfjs-dist",
-    root,
-    safePath,
-  );
-
-  if (!existsSync(filePath) || !statSync(filePath).isFile()) {
+  const filePath = resolveAsset(root, safePath);
+  if (!filePath) {
     throw createError({ statusCode: 404, statusMessage: "Asset not found" });
   }
 

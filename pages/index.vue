@@ -565,9 +565,10 @@
                   class="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500"
                   :class="`
               ${col === '#' ? 'sticky left-10 z-[55] w-14 bg-gray-50' : ''}
+              ${col === 'Score' ? 'sticky left-36 z-[55] w-20 bg-gray-50' : ''}
               ${
-                col === 'Status' && showFullTableColumns
-                  ? 'sticky left-24 z-[55] bg-gray-50'
+                col === 'Documento' && showFullTableColumns
+                  ? 'sticky left-20 z-[55] bg-gray-50'
                   : ''
               }
               ${col === 'Status' ? 'w-12' : ''}

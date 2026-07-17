@@ -2,7 +2,24 @@
 
 export default defineNuxtConfig({
   devtools: { enabled: true },
-  modules: ["@nuxtjs/tailwindcss", "@nuxtjs/supabase"],
+  modules: ["@nuxtjs/tailwindcss", "@nuxtjs/supabase", "@posthog/nuxt"],
+  // PostHog project token + host. Session replay is enabled by default in
+  // posthog-js; also turn on "Record user sessions" in PostHog project settings.
+  posthogConfig: {
+    publicKey: process.env.NUXT_PUBLIC_POSTHOG_KEY || "",
+    host: process.env.NUXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com",
+    clientConfig: {
+      capture_pageview: true,
+      capture_pageleave: true,
+      // Explicitly keep session replay on (default is already false).
+      disable_session_recording: false,
+      enable_recording_console_log: true,
+      // Inputs (passwords, tax IDs, etc.) stay masked in replays.
+      session_recording: {
+        maskAllInputs: true,
+      },
+    },
+  },
   runtimeConfig: {
     // Server-only. The Gemini API key powers template/invoice analysis and
     // must never reach the browser.

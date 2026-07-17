@@ -20,6 +20,7 @@
     "nuxt": "latest"
   },
   "dependencies": {
+    "@posthog/nuxt": "^1.7.80",
     "@supabase/supabase-js": "^2.106.2",
     "pdfjs-dist": "^5.7.284",
     "skills": "^1.5.9",

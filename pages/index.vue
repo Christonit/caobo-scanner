@@ -540,7 +540,9 @@
               class="border-b border-slate-300 bg-gray-50 sticky top-0 z-50"
             >
               <tr>
-                <th class="w-10 px-3 py-3 text-center sticky left-0 bg-gray-50">
+                <th
+                  class="w-10 px-3 py-3 text-center sticky left-0 z-[55] bg-gray-50"
+                >
                   <input
                     type="checkbox"
                     class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
@@ -562,7 +564,13 @@
                   :key="col"
                   class="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500"
                   :class="`
-              ${col == 'Status' ? 'w-12 mr-auto' : ''}
+              ${col === '#' ? 'sticky left-10 z-[55] w-14 bg-gray-50' : ''}
+              ${
+                col === 'Status' && showFullTableColumns
+                  ? 'sticky left-24 z-[55] bg-gray-50'
+                  : ''
+              }
+              ${col === 'Status' ? 'w-12' : ''}
                    ${
                      col === 'Preview w-24' ||
                      col === 'Acciones w-24 text-center'
@@ -600,7 +608,7 @@
                 @click="onRowClick($event, file.id)"
               >
                 <td
-                  :class="`px-3 py-2.5 text-center sticky left-0 hover:bg-gray-50 z-[25] ${isSelected(file.id) ? 'bg-slate-100' : 'bg-white'}`"
+                  :class="`px-3 py-2.5 text-center sticky left-0 hover:bg-gray-50 z-[25] ${isSelected(file.id) ? 'bg-slate-100' : isEdited(file) ? 'bg-amber-50' : 'bg-white'}`"
                 >
                   <input
                     type="checkbox"
@@ -609,7 +617,10 @@
                     @change="toggleSelect(file.id)"
                   />
                 </td>
-                <td v-if="showFullTableColumns" class="px-4 py-2.5">
+                <td
+                  v-if="showFullTableColumns"
+                  :class="`px-4 py-2.5 w-14 sticky left-10 z-[25] hover:bg-gray-50 ${isSelected(file.id) ? 'bg-slate-100' : isEdited(file) ? 'bg-amber-50' : 'bg-white'}`"
+                >
                   <span class="text-sm text-gray-500">{{ index + 1 }}</span>
                 </td>
                 <!-- Documento -->
@@ -638,7 +649,9 @@
                 </td>
 
                 <!-- Status -->
-                <td class="px-2 py-2.5 w-12 mr-auto">
+                <td
+                  :class="`px-2 py-2.5 w-12 ${showFullTableColumns ? 'sticky left-24 z-[25] hover:bg-gray-50 ' + (isSelected(file.id) ? 'bg-slate-100' : isEdited(file) ? 'bg-amber-50' : 'bg-white') : ''}`"
+                >
                   <span
                     v-if="file.reviewLater"
                     class="inline-flex rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-semibold text-violet-700"

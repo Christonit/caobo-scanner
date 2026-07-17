@@ -4,11 +4,19 @@ const route = useRoute();
 
 const supabase = useSupabaseClient();
 const user = useSupabaseUser();
-const { activeOrg, refresh } = useOrganization();
+const { activeOrg, isAdmin, isSuperAdmin, allOrgs, setActiveOrg, refresh } =
+  useOrganization();
 
 watchEffect(async () => {
   if (features.auth && user.value?.sub) await refresh();
 });
+
+const orgMenuOpen = ref(false);
+
+function selectOrg(orgId: string) {
+  setActiveOrg(orgId);
+  orgMenuOpen.value = false;
+}
 
 // Routes that render the bare slot (no sidebar). Login/signup already opt out
 // via `definePageMeta({ layout: false })`; onboarding has no org yet so it
@@ -30,7 +38,7 @@ async function signOut() {
 }
 
 const nav = [
-  { to: "/resumen", label: "Resumen", icon: "home" },
+  { to: "/", label: "Resumen", icon: "home" },
   {
     to: "/",
     label: "Extraer",
@@ -40,10 +48,13 @@ const nav = [
       { to: "/suplidores", label: "Suplidores" },
     ],
   },
-  { to: "/documentos", label: "Documentos", icon: "doc" },
   { to: "/clientes", label: "Clientes", icon: "users" },
-  { to: "/plantillas", label: "Plantillas", icon: "template" },
+  { to: "/#", label: "Plantillas", icon: "template" },
 ];
+
+const navWithTeam = computed(() =>
+  isAdmin.value ? [...nav, { to: "/team", label: "Equipo", icon: "users" }] : nav,
+);
 
 function isNavActive(to: string, children?: { to: string }[]) {
   if (children?.length) {
@@ -81,9 +92,13 @@ const userInitials = computed(() =>
           class="fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-gray-200 bg-white"
         >
           <!-- Logo / org switcher -->
-          <div class="px-4 py-4">
+          <div class="relative px-4 py-4">
             <button
-              class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-gray-100"
+              type="button"
+              :disabled="!isSuperAdmin"
+              @click="orgMenuOpen = isSuperAdmin ? !orgMenuOpen : false"
+              class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition"
+              :class="isSuperAdmin ? 'hover:bg-gray-100' : 'cursor-default'"
             >
               <span
                 class="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white"
@@ -94,7 +109,9 @@ const userInitials = computed(() =>
                 {{ activeOrg?.name ?? "Caobo Recibos" }}
               </span>
               <svg
-                class="h-4 w-4 text-gray-400"
+                v-if="isSuperAdmin"
+                class="h-4 w-4 text-gray-400 transition"
+                :class="orgMenuOpen ? 'rotate-180' : ''"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -107,12 +124,39 @@ const userInitials = computed(() =>
                 />
               </svg>
             </button>
+
+            <!-- Superadmin org switcher dropdown -->
+            <div
+              v-if="isSuperAdmin && orgMenuOpen"
+              class="absolute left-4 right-4 top-full z-40 mt-1 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+            >
+              <p class="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                Ver como organización
+              </p>
+              <button
+                v-for="org in allOrgs"
+                :key="org.id"
+                type="button"
+                @click="selectOrg(org.id)"
+                class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition"
+                :class="
+                  org.id === activeOrg?.id
+                    ? 'bg-emerald-50 text-emerald-700 font-medium'
+                    : 'text-gray-700 hover:bg-gray-100'
+                "
+              >
+                <span class="truncate">{{ org.name }}</span>
+              </button>
+              <p v-if="!allOrgs.length" class="px-3 py-2 text-sm text-gray-400">
+                No hay organizaciones.
+              </p>
+            </div>
           </div>
 
           <!-- Nav -->
           <nav class="flex-1 space-y-0.5 px-3">
             <div
-              v-for="item in nav"
+              v-for="item in navWithTeam"
               :key="item.to"
               :class="item.children ? 'group/flyout relative' : ''"
             >

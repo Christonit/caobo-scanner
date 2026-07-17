@@ -67,7 +67,7 @@ const SEED_USERS = [
     email: "member@example.com",
     password: "password123!",
     full_name: "Demo Member",
-    role: "member",
+    role: "collaborator",
   },
 ];
 

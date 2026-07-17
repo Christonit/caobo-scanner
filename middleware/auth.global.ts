@@ -14,12 +14,20 @@
 import type { Database } from "~/types/database.types";
 import type { FeatureFlag } from "~/composables/useFeatureFlags";
 
-const AUTH_PAGES = new Set(["/login", "/signup", "/onboarding"]);
+const AUTH_PAGES = new Set([
+  "/login",
+  "/signup",
+  "/onboarding",
+  "/forgot-password",
+  "/auth/reset-password",
+]);
 const ALWAYS_PUBLIC = new Set([
   "/login",
   "/signup",
   "/onboarding",
+  "/forgot-password",
   "/auth/callback",
+  "/auth/reset-password",
 ]);
 
 // Routes that are only reachable when a specific feature flag is enabled.
@@ -69,7 +77,20 @@ export default defineNuxtRouteMiddleware(async (to) => {
     console.error("[auth] failed to check membership", error);
     return;
   }
-  if (!data) {
-    return navigateTo("/onboarding");
+  if (data) return;
+
+  // No org membership — superadmins are intentionally org-less (they pick
+  // an org to act on from the switcher), so skip the onboarding redirect.
+  const { data: superadminRow, error: superadminError } = await supabase
+    .from("superadmins")
+    .select("user_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (superadminError) {
+    console.error("[auth] failed to check superadmin", superadminError);
+    return;
   }
+  if (superadminRow) return;
+
+  return navigateTo("/onboarding");
 });

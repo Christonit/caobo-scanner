@@ -38,7 +38,7 @@ export type Database = {
         Row: {
           id: string;
           organization_id: string;
-          role: string;
+          role: "admin" | "collaborator";
           full_name: string | null;
           avatar_url: string | null;
           created_at: string;
@@ -47,14 +47,29 @@ export type Database = {
         Insert: {
           id: string;
           organization_id: string;
-          role?: string;
+          role?: "admin" | "collaborator";
           full_name?: string | null;
           avatar_url?: string | null;
         };
         Update: {
-          role?: string;
+          role?: "admin" | "collaborator";
           full_name?: string | null;
           avatar_url?: string | null;
+        };
+      };
+      // Org-less global admins. Membership is managed only via the service
+      // role (setup scripts / dashboard) — never inserted/updated from the
+      // browser client.
+      superadmins: {
+        Row: {
+          user_id: string;
+          created_at: string;
+        };
+        Insert: {
+          user_id: string;
+        };
+        Update: {
+          user_id?: string;
         };
       };
       clients: {
@@ -296,6 +311,10 @@ export type Database = {
       current_user_org: {
         Args: Record<string, never>;
         Returns: string | null;
+      };
+      is_superadmin: {
+        Args: { uid?: string };
+        Returns: boolean;
       };
     };
   };

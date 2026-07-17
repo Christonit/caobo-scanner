@@ -9,14 +9,13 @@ export default defineNuxtConfig({
     publicKey: process.env.NUXT_PUBLIC_POSTHOG_KEY || "",
     host: process.env.NUXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com",
     clientConfig: {
-      capture_pageview: true,
-      capture_pageleave: true,
+      capture_exeptions: true,
       // Explicitly keep session replay on (default is already false).
       disable_session_recording: false,
       enable_recording_console_log: true,
       // Inputs (passwords, tax IDs, etc.) stay masked in replays.
       session_recording: {
-        maskAllInputs: true,
+        maskAllInputs: false,
       },
     },
   },
@@ -29,6 +28,11 @@ export default defineNuxtConfig({
       process.env.TEMPLATE_ANALYSIS_MODEL || "gemini-2.5-flash",
     // Default model used when extracting data from invoices/receipts.
     invoiceAnalysisModel: process.env.INVOICE_ANALYSIS_MODEL || "",
+    // Server-only. Supabase "secret" key (service role) — used by
+    // /server/api/team/** to create/invite users and bypass RLS safely
+    // after the route has verified caller authorization itself.
+    supabaseSecretKey:
+      process.env.NUXT_SUPABASE_SECRET_KEY || process.env.SUPABASE_SECRET_KEY || "",
     public: {
       // Overridable at runtime with NUXT_PUBLIC_API_BASE (see useApiBase()).
       apiBase: process.env.NUXT_PUBLIC_API_BASE || "http://localhost:8000",
@@ -51,12 +55,20 @@ export default defineNuxtConfig({
       login: "/login",
       callback: "/auth/callback",
       include: undefined,
-      exclude: ["/login", "/signup", "/auth/callback", "/forgot-password"],
+      exclude: [
+        "/login",
+        "/signup",
+        "/auth/callback",
+        "/auth/reset-password",
+        "/forgot-password",
+      ],
       cookieRedirect: false,
     },
   },
   routeRules: {
+    // Tokens arrive in the URL fragment / query — client-only.
     "/auth/callback": { ssr: false },
+    "/auth/reset-password": { ssr: false },
   },
   vite: {
     optimizeDeps: {

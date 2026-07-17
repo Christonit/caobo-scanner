@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import type { Client } from "~/composables/useClients";
+import type { ClientDocumentWithAttributes } from "~/composables/useClientDocuments";
+import type { ClientBusinessRuleWithAttributes } from "~/composables/useClientBusinessRules";
 
 const { list, create, remove } = useClients();
-const { create: createBusinessRule } = useClientBusinessRules();
+const { create: createBusinessRule, listByClient: listRulesByClient } =
+  useClientBusinessRules();
+const { listByClient: listDocumentsByClient, create: createDocument } =
+  useClientDocuments();
 
 const clients = ref<Client[]>([]);
 const pending = ref(true);
@@ -59,6 +64,54 @@ function resetBusinessRulesForm() {
   ];
 }
 
+// --- Copy documents/business rules from an existing client ----------------
+const copyFromExisting = ref(false);
+const copySourceClientId = ref("");
+const loadingCopySource = ref(false);
+const copySourceError = ref<string | null>(null);
+const copySourceDocuments = ref<ClientDocumentWithAttributes[]>([]);
+const copySourceRules = ref<ClientBusinessRuleWithAttributes[]>([]);
+const selectedDocumentIds = ref<string[]>([]);
+const selectedRuleIds = ref<string[]>([]);
+
+function resetCopyForm() {
+  copyFromExisting.value = false;
+  copySourceClientId.value = "";
+  loadingCopySource.value = false;
+  copySourceError.value = null;
+  copySourceDocuments.value = [];
+  copySourceRules.value = [];
+  selectedDocumentIds.value = [];
+  selectedRuleIds.value = [];
+}
+
+async function onCopySourceChange() {
+  copySourceError.value = null;
+  copySourceDocuments.value = [];
+  copySourceRules.value = [];
+  selectedDocumentIds.value = [];
+  selectedRuleIds.value = [];
+
+  if (!copySourceClientId.value) return;
+
+  loadingCopySource.value = true;
+  try {
+    const [docs, rules] = await Promise.all([
+      listDocumentsByClient(copySourceClientId.value),
+      listRulesByClient(copySourceClientId.value),
+    ]);
+    copySourceDocuments.value = docs;
+    copySourceRules.value = rules;
+    selectedDocumentIds.value = docs.map((d) => d.id);
+    selectedRuleIds.value = rules.map((r) => r.id);
+  } catch (err: any) {
+    copySourceError.value =
+      err?.message || "No se pudo cargar la información de ese cliente.";
+  } finally {
+    loadingCopySource.value = false;
+  }
+}
+
 async function load() {
   pending.value = true;
   error.value = null;
@@ -76,6 +129,7 @@ function openForm() {
   form.taxPayerId = "";
   formError.value = null;
   resetBusinessRulesForm();
+  resetCopyForm();
   showForm.value = true;
 }
 
@@ -114,6 +168,57 @@ async function onSubmit() {
         error.value =
           ruleErr?.message ||
           "El cliente se creó, pero no se pudieron guardar las reglas de negocio.";
+      }
+    }
+
+    if (copyFromExisting.value && copySourceClientId.value) {
+      const copyErrors: string[] = [];
+
+      const docsToCopy = copySourceDocuments.value.filter((d) =>
+        selectedDocumentIds.value.includes(d.id)
+      );
+      for (const doc of docsToCopy) {
+        try {
+          await createDocument(created.id, {
+            documentName: doc.document_name,
+            documentComment: doc.comment ?? "",
+            attributes: doc.document_attributes.map((a) => ({
+              documentType: a.document_type,
+              documentId: a.document_id,
+              description: a.description ?? "",
+            })),
+          });
+        } catch (docErr: any) {
+          copyErrors.push(
+            docErr?.message || `No se pudo copiar el documento "${doc.document_name}".`
+          );
+        }
+      }
+
+      const rulesToCopy = copySourceRules.value.filter((r) =>
+        selectedRuleIds.value.includes(r.id)
+      );
+      for (const rule of rulesToCopy) {
+        try {
+          await createBusinessRule(created.id, {
+            ruleName: rule.rule_name,
+            attributes: rule.business_rule_attributes.map((a) => ({
+              ruleType: a.rule_type,
+              ruleValue: a.rule_value ?? "",
+              description: a.description ?? "",
+            })),
+          });
+        } catch (ruleErr: any) {
+          copyErrors.push(
+            ruleErr?.message || `No se pudo copiar la regla "${rule.rule_name}".`
+          );
+        }
+      }
+
+      if (copyErrors.length > 0) {
+        // The client was created successfully; surface copy failures without
+        // blocking, since the copied items can be re-added later.
+        error.value = `El cliente se creó, pero hubo problemas al copiar: ${copyErrors.join(" ")}`;
       }
     }
 
@@ -301,7 +406,7 @@ onMounted(load);
       @click.self="closeForm"
     >
       <div
-        class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-lg"
+        class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-gray-200 bg-white p-6 shadow-lg"
         role="dialog"
         aria-modal="true"
         aria-labelledby="nuevo-cliente-title"
@@ -351,6 +456,137 @@ onMounted(load);
               class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
               placeholder="Ej. 101234567"
             />
+          </div>
+
+          <div class="rounded-lg border border-gray-200 bg-gray-50/60 p-3.5">
+            <label class="flex w-full cursor-pointer items-center justify-between gap-2 text-left">
+              <span>
+                <span class="block text-sm font-medium text-gray-700">
+                  Copiar de un cliente existente
+                  <span class="font-normal text-gray-400">(opcional)</span>
+                </span>
+                <span class="mt-0.5 block text-xs text-gray-400">
+                  Copia documentos y reglas de negocio desde otro cliente ya
+                  creado.
+                </span>
+              </span>
+              <input
+                v-model="copyFromExisting"
+                type="checkbox"
+                class="h-4 w-4 flex-shrink-0 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500/40"
+                @change="copyFromExisting || resetCopyForm()"
+              />
+            </label>
+
+            <div v-if="copyFromExisting" class="mt-3.5 space-y-3">
+              <div>
+                <label
+                  for="copy-source-client"
+                  class="mb-1.5 block text-xs font-medium text-gray-600"
+                >
+                  Cliente de origen
+                </label>
+                <select
+                  id="copy-source-client"
+                  v-model="copySourceClientId"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                  @change="onCopySourceChange"
+                >
+                  <option value="">Selecciona un cliente…</option>
+                  <option
+                    v-for="c in clients"
+                    :key="c.id"
+                    :value="c.id"
+                  >
+                    {{ c.name }}
+                  </option>
+                </select>
+              </div>
+
+              <p
+                v-if="copySourceError"
+                class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+              >
+                {{ copySourceError }}
+              </p>
+
+              <div
+                v-else-if="loadingCopySource"
+                class="text-sm text-gray-400"
+              >
+                Cargando…
+              </div>
+
+              <template v-else-if="copySourceClientId">
+                <div>
+                  <p class="mb-1.5 text-xs font-medium text-gray-600">
+                    Documentos
+                  </p>
+                  <div
+                    v-if="copySourceDocuments.length === 0"
+                    class="text-xs text-gray-400"
+                  >
+                    Este cliente no tiene documentos.
+                  </div>
+                  <div v-else class="space-y-1.5">
+                    <label
+                      v-for="doc in copySourceDocuments"
+                      :key="doc.id"
+                      class="flex cursor-pointer items-start gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <input
+                        v-model="selectedDocumentIds"
+                        type="checkbox"
+                        :value="doc.id"
+                        class="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500/40"
+                      />
+                      <span>
+                        <span class="block font-medium text-gray-700">{{
+                          doc.document_name
+                        }}</span>
+                        <span class="block text-xs text-gray-400">
+                          {{ doc.document_attributes.length }} atributo(s)
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <p class="mb-1.5 text-xs font-medium text-gray-600">
+                    Reglas de negocio
+                  </p>
+                  <div
+                    v-if="copySourceRules.length === 0"
+                    class="text-xs text-gray-400"
+                  >
+                    Este cliente no tiene reglas de negocio.
+                  </div>
+                  <div v-else class="space-y-1.5">
+                    <label
+                      v-for="rule in copySourceRules"
+                      :key="rule.id"
+                      class="flex cursor-pointer items-start gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <input
+                        v-model="selectedRuleIds"
+                        type="checkbox"
+                        :value="rule.id"
+                        class="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500/40"
+                      />
+                      <span>
+                        <span class="block font-medium text-gray-700">{{
+                          rule.rule_name
+                        }}</span>
+                        <span class="block text-xs text-gray-400">
+                          {{ rule.business_rule_attributes.length }} atributo(s)
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </template>
+            </div>
           </div>
 
           <div class="rounded-lg border border-gray-200 bg-gray-50/60 p-3.5">

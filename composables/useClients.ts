@@ -22,9 +22,13 @@ export const useClients = () => {
   }
 
   async function list(): Promise<Client[]> {
+    // Explicit org filter (not just RLS) so a superadmin acting on one
+    // organization doesn't see every organization's clients at once.
+    const organizationId = await ensureOrgId();
     const { data, error } = await supabase
       .from("clients")
       .select("*")
+      .eq("organization_id", organizationId)
       .is("deleted_at", null)
       .order("created_at", { ascending: false });
     if (error) throw error;

@@ -20,10 +20,10 @@ export default defineNuxtConfig({
     host: process.env.NUXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com",
     clientConfig: {
       capture_exceptions: true,
-      // Explicitly keep session replay on (default is already false).
+      // Session replay is on unless project settings disable it.
+      // disable_session_recording defaults to false; keep it explicit.
       disable_session_recording: false,
       enable_recording_console_log: true,
-      // Inputs (passwords, tax IDs, etc.) stay masked in replays.
       session_recording: {
         maskAllInputs: false,
       },

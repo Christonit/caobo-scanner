@@ -92,7 +92,14 @@ async function findUserByEmail(email) {
 async function createOrFetchUser(spec) {
   const existing = await findUserByEmail(spec.email);
   if (existing) {
-    console.log(`  · user exists: ${spec.email} (${existing.id})`);
+    // Always sync the password so the seed is truly idempotent even when the
+    // account was first created via invite (which leaves no password set).
+    const { error: updateErr } = await admin.auth.admin.updateUserById(
+      existing.id,
+      { password: spec.password, email_confirm: true }
+    );
+    if (updateErr) throw updateErr;
+    console.log(`  · user exists, password synced: ${spec.email} (${existing.id})`);
     return existing;
   }
   const { data, error } = await admin.auth.admin.createUser({

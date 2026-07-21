@@ -199,6 +199,7 @@ export type Database = {
           selectivo_column: number | null;
           descuento_column: number | null;
           propina_column: number | null;
+          otros_impuestos_column: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -209,12 +210,14 @@ export type Database = {
           selectivo_column?: number | null;
           descuento_column?: number | null;
           propina_column?: number | null;
+          otros_impuestos_column?: number | null;
         };
         Update: {
           itbis_column?: number | null;
           selectivo_column?: number | null;
           descuento_column?: number | null;
           propina_column?: number | null;
+          otros_impuestos_column?: number | null;
           updated_at?: string;
         };
       };

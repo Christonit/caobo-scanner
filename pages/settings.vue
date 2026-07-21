@@ -88,6 +88,7 @@ interface MemberRow {
   fullName: string | null;
   email: string | null;
   createdAt: string;
+  activated: boolean;
   disabled: boolean;
 }
 
@@ -142,19 +143,25 @@ async function submitInvite() {
   inviteSuccess.value = null;
   inviteSubmitting.value = true;
   try {
+    const sentEmail = inviteEmail.value.trim();
     await $fetch("/api/team/invite", {
       method: "POST",
       body: {
-        email: inviteEmail.value,
+        email: sentEmail,
         fullName: inviteFullName.value,
         role: inviteRole.value,
-        organizationId: activeOrg.value.id,
+        organizationId: activeOrg.value?.id,
       },
     });
-    inviteSuccess.value = `Invitación enviada a ${inviteEmail.value}.`;
+    inviteSuccess.value = `Invitación enviada a ${sentEmail}.`;
     inviteEmail.value = "";
     inviteFullName.value = "";
+    inviteRole.value = "collaborator";
     await loadMembers();
+    setTimeout(() => {
+      showInvite.value = false;
+      inviteSuccess.value = null;
+    }, 2500);
   } catch (err: any) {
     inviteError.value =
       err?.data?.statusMessage || err?.message || "No se pudo invitar.";
@@ -495,6 +502,16 @@ const {
                   "
                 >
                   {{ m.role === "admin" ? "Administrador" : "Colaborador" }}
+                </span>
+                <span
+                  class="flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
+                  :class="
+                    m.activated
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'bg-amber-50 text-amber-600'
+                  "
+                >
+                  {{ m.activated ? "Activo" : "Invitación pendiente" }}
                 </span>
                 <span
                   v-if="m.disabled"

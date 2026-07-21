@@ -43,6 +43,8 @@ export default defineEventHandler(async (event) => {
   const siteUrl = getRequestURL(event).origin;
   const { error: resetError } = await admin.auth.resetPasswordForEmail(
     authUser.user.email,
+    // Point directly at the set-password page so the PKCE code is exchanged
+    // there, keeping the PASSWORD_RECOVERY session alive when updateUser runs.
     { redirectTo: `${siteUrl}/auth/reset-password` }
   );
 

@@ -129,6 +129,7 @@ const TAX_COLUMN_FIELD_LABELS: Record<
   selectivo: "Selectivo",
   descuento: "Descuento",
   propina: "Propina",
+  otros_impuestos: "Otros Impuestos",
 };
 const taxMapping = ref<TaxColumnMapping>({});
 const taxMappingSaving = ref(false);

@@ -11,40 +11,73 @@ const loading = ref(false);
 const ready = ref(false);
 const done = ref(false);
 
-function isRecoveryHash(): boolean {
-  if (typeof window === "undefined") return false;
-  const hash = window.location.hash.replace(/^#/, "");
-  const fromHash = new URLSearchParams(hash).get("type");
-  const fromQuery = new URLSearchParams(window.location.search).get("type");
-  return fromHash === "recovery" || fromQuery === "recovery";
-}
-
 onMounted(async () => {
-  const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-    if (event === "PASSWORD_RECOVERY") {
-      ready.value = true;
+  // Step 1 — listen for auth events BEFORE doing anything else so we don't
+  // miss the PASSWORD_RECOVERY event that fires during code exchange.
+  const recoveryConfirmed = await new Promise<boolean>((resolve) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        sub.subscription.unsubscribe();
+        resolve(true);
+      }
+    });
+
+    // Step 2 — If this is a PKCE flow the URL has ?code=... with no type.
+    // Exchange it explicitly; this fires PASSWORD_RECOVERY above if it's a
+    // recovery token, or SIGNED_IN for an invite token.
+    const code = new URLSearchParams(window.location.search).get("code");
+    if (code) {
+      (supabase.auth as any)
+        .exchangeCodeForSession(code)
+        .catch(() => null); // errors handled via missing event → timeout below
     }
+
+    // Step 3 — Implicit flow: type=recovery is already in the hash/query.
+    const hash = window.location.hash.replace(/^#/, "");
+    const typeFromHash = new URLSearchParams(hash).get("type");
+    const typeFromQuery = new URLSearchParams(window.location.search).get("type");
+    if (typeFromHash === "recovery" || typeFromQuery === "recovery") {
+      // The supabase-js client will process the hash token automatically;
+      // PASSWORD_RECOVERY fires via onAuthStateChange above. Give it a moment.
+    }
+
+    // Step 4 — If the user was redirected here from /auth/callback and the
+    // session is already established (no code/hash in URL), check now.
+    const hasToken =
+      code ||
+      typeFromHash === "recovery" ||
+      typeFromQuery === "recovery" ||
+      new URLSearchParams(hash).get("access_token");
+
+    if (!hasToken) {
+      // No token in URL — this might be a redirect from the callback page
+      // which already exchanged the code. Check the existing session.
+      supabase.auth.getSession().then(({ data }) => {
+        if (data.session) {
+          sub.subscription.unsubscribe();
+          // We have a session but it came from an already-established recovery
+          // via the callback page. Trust it and show the form.
+          resolve(true);
+        } else {
+          // No session and no token — link is invalid or expired.
+          sub.subscription.unsubscribe();
+          resolve(false);
+        }
+      });
+    }
+
+    // Safety timeout so we never hang indefinitely on a broken link.
+    setTimeout(() => {
+      sub.subscription.unsubscribe();
+      resolve(false);
+    }, 6000);
   });
 
-  // Give the Supabase client a moment to consume tokens from the URL
-  // (hash fragment or PKCE code) before deciding the link is invalid.
-  await new Promise((r) => setTimeout(r, 0));
-  const { data, error: sessionError } = await supabase.auth.getSession();
-
-  if (sessionError) {
-    error.value = sessionError.message;
-    sub.subscription.unsubscribe();
-    return;
-  }
-
-  if (data.session || isRecoveryHash()) {
+  if (recoveryConfirmed) {
     ready.value = true;
   } else {
-    error.value =
-      "El enlace de recuperación no es válido o ya expiró. Solicita uno nuevo.";
+    error.value = "El enlace no es válido o ya expiró. Solicita uno nuevo.";
   }
-
-  sub.subscription.unsubscribe();
 });
 
 async function savePassword() {

@@ -3,12 +3,13 @@ import type { Database } from "~/types/database.types";
 export type ClientTaxColumnMapping =
   Database["public"]["Tables"]["client_tax_column_mappings"]["Row"];
 
-/** The 4 amounts that can be routed into one of the 5 "Impuesto" slots. */
+/** The amounts that can be routed into one of the 5 "Impuesto" slots. */
 export const TAX_COLUMN_FIELDS = [
   "itbis",
   "selectivo",
   "descuento",
   "propina",
+  "otros_impuestos",
 ] as const;
 export type TaxColumnField = (typeof TAX_COLUMN_FIELDS)[number];
 
@@ -16,10 +17,11 @@ export type TaxColumnField = (typeof TAX_COLUMN_FIELDS)[number];
 export type TaxColumnMapping = Partial<Record<TaxColumnField, number | null>>;
 
 const DEFAULT_MAPPING: TaxColumnMapping = {
-  itbis: 1,
-  selectivo: 2,
+  itbis: null,
+  selectivo: null,
   descuento: null,
   propina: null,
+  otros_impuestos: null,
 };
 
 function rowToMapping(
@@ -31,6 +33,7 @@ function rowToMapping(
     selectivo: row.selectivo_column,
     descuento: row.descuento_column,
     propina: row.propina_column,
+    otros_impuestos: row.otros_impuestos_column,
   };
 }
 
@@ -59,7 +62,7 @@ export const useClientTaxColumnMapping = () => {
     const hasDuplicates = new Set(usedSlots).size !== usedSlots.length;
     if (hasDuplicates) {
       throw new Error(
-        "Cada columna Impuesto 1-5 solo puede usarse para un valor (ITBIS, Selectivo, Descuento o Propina)."
+        "Cada columna Impuesto 1-5 solo puede usarse para un valor (ITBIS, Selectivo, Descuento, Propina u Otros Impuestos)."
       );
     }
 
@@ -72,6 +75,7 @@ export const useClientTaxColumnMapping = () => {
           selectivo_column: mapping.selectivo ?? null,
           descuento_column: mapping.descuento ?? null,
           propina_column: mapping.propina ?? null,
+          otros_impuestos_column: mapping.otros_impuestos ?? null,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "client_id" }

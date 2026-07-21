@@ -25,10 +25,17 @@ export async function authorizeTeamCaller(
     throw createError({ statusCode: 401, statusMessage: "No autenticado." });
   }
 
+  // @nuxtjs/supabase v2 returns JWT claims from serverSupabaseUser, where the
+  // user UUID lives in `sub` (not `id`). Fall back to `id` for compatibility.
+  const userId = (user as any).sub ?? user.id;
+  if (!userId) {
+    throw createError({ statusCode: 401, statusMessage: "No autenticado." });
+  }
+
   const { data: profile, error: profileError } = await admin
     .from("user_profiles")
     .select("organization_id, role")
-    .eq("id", user.id)
+    .eq("id", userId)
     .maybeSingle();
   if (profileError) {
     throw createError({ statusCode: 500, statusMessage: profileError.message });
@@ -42,7 +49,7 @@ export async function authorizeTeamCaller(
       });
     }
     return {
-      userId: user.id,
+      userId,
       organizationId: profile.organization_id,
       actingAsSuperAdmin: false,
     };
@@ -51,7 +58,7 @@ export async function authorizeTeamCaller(
   const { data: superadminRow, error: superadminError } = await admin
     .from("superadmins")
     .select("user_id")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
   if (superadminError) {
     throw createError({ statusCode: 500, statusMessage: superadminError.message });
@@ -81,7 +88,7 @@ export async function authorizeTeamCaller(
   }
 
   return {
-    userId: user.id,
+    userId,
     organizationId: org.id,
     actingAsSuperAdmin: true,
   };

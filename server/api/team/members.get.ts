@@ -28,6 +28,9 @@ export default defineEventHandler(async (event) => {
         fullName: profile.full_name,
         createdAt: profile.created_at,
         email: authUser?.user?.email ?? null,
+        // Supabase sets email_confirmed_at when the user clicks the invite
+        // link (or confirms their email). Null means the invite is still pending.
+        activated: Boolean(authUser?.user?.email_confirmed_at),
         // Supabase clears `banned_until` back to null when a user is
         // unbanned (ban_duration: "none"), so its mere presence means
         // the member is currently disabled.

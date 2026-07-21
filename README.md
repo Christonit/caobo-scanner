@@ -33,8 +33,8 @@ The two services run independently and communicate over HTTP. The frontend reads
 
 - **Users** authenticate via Supabase Auth (email + password by default).
 - **Organizations** are tenants (the company a user works for). They own clients and members.
-- **Roles** (`admin` or `collaborator`) are assigned per-organization through the `organization_members` join table — a user can belong to many orgs with different roles.
-- **Admins** can invite collaborators by email. New users land directly inside the org via a database trigger; existing users are attached server-side after a check.
+- **Roles** (`admin` or `collaborator`) are assigned per-organization. With the multi-org migration applied, memberships live in `organization_members` and a user can belong to many orgs; `user_profiles` stores the *active* org used by RLS.
+- **Admins** can invite collaborators by email. New users get a profile + membership; existing users are added as an extra membership so they can switch orgs from the sidebar.
 - **Clients** belong to a single organization and inherit its access policies.
 
 All multi-tenant access is enforced in Postgres via RLS policies (see `supabase/migrations/20260528000000_init_auth_schema.sql`).
@@ -138,11 +138,23 @@ The frontend is served at `http://localhost:3000`. Visit `/signup` to create an 
 
 ## Schema migrations
 
-Initial schema lives at `supabase/migrations/20260528000000_init_auth_schema.sql`. To make changes:
+Initial schema lives at `supabase/migrations/`. To make changes:
 
 1. Iterate freely against the database with `supabase db query "<SQL>"` or the Studio SQL editor.
 2. When happy, run `supabase db diff <name> --linked` to capture the diff into a new migration file.
 3. Commit and `supabase db push`.
+
+### Multi-organization memberships
+
+Migration `20260721000001_organization_members.sql` adds `public.organization_members` so a user can belong to more than one org. The active org still lives on `user_profiles` (used by RLS); switching updates that row via `switch_organization()`.
+
+Apply it with:
+
+```bash
+npx supabase db push --linked
+```
+
+Until that migration is applied, the app still works in single-org mode (settings shows the current org; the sidebar switcher appears only for superadmins).
 
 ## Production Build
 

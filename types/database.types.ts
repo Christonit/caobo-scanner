@@ -72,6 +72,23 @@ export type Database = {
           user_id?: string;
         };
       };
+      organization_members: {
+        Row: {
+          user_id: string;
+          organization_id: string;
+          role: "admin" | "collaborator";
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          organization_id: string;
+          role?: "admin" | "collaborator";
+        };
+        Update: {
+          role?: "admin" | "collaborator";
+        };
+      };
       clients: {
         Row: {
           id: string;
@@ -314,6 +331,17 @@ export type Database = {
       current_user_org: {
         Args: Record<string, never>;
         Returns: string | null;
+      };
+      switch_organization: {
+        Args: { p_organization_id: string };
+        Returns: {
+          id: string;
+          name: string;
+          slug: string;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
       };
       is_superadmin: {
         Args: { uid?: string };

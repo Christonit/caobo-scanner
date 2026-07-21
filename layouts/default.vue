@@ -4,18 +4,40 @@ const route = useRoute();
 
 const supabase = useSupabaseClient();
 const user = useSupabaseUser();
-const { activeOrg, isAdmin, isSuperAdmin, allOrgs, setActiveOrg, refresh } =
-  useOrganization();
+const {
+  activeOrg,
+  isAdmin,
+  isSuperAdmin,
+  switchableOrgs,
+  canSwitchOrgs,
+  setActiveOrg,
+  refresh,
+} = useOrganization();
 
 watchEffect(async () => {
   if (features.auth && user.value?.sub) await refresh();
 });
 
 const orgMenuOpen = ref(false);
+const switchingOrg = ref(false);
 
-function selectOrg(orgId: string) {
-  setActiveOrg(orgId);
-  orgMenuOpen.value = false;
+async function selectOrg(orgId: string) {
+  if (orgId === activeOrg.value?.id) {
+    orgMenuOpen.value = false;
+    return;
+  }
+  switchingOrg.value = true;
+  try {
+    await setActiveOrg(orgId);
+    orgMenuOpen.value = false;
+    // Reload tenant-scoped pages against the new active org.
+    await refreshNuxtData();
+    await navigateTo(route.fullPath, { replace: true, force: true });
+  } catch (err) {
+    console.error("[layout] failed to switch organization", err);
+  } finally {
+    switchingOrg.value = false;
+  }
 }
 
 // Routes that render the bare slot (no sidebar). Login/signup already opt out
@@ -91,14 +113,14 @@ const userInitials = computed(() =>
         <aside
           class="fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-gray-200 bg-white"
         >
-          <!-- Logo / org switcher -->
+          <!-- Logo / org switcher (multi-org members + superadmins) -->
           <div class="relative px-4 py-4">
             <button
               type="button"
-              :disabled="!isSuperAdmin"
-              @click="orgMenuOpen = isSuperAdmin ? !orgMenuOpen : false"
+              :disabled="!canSwitchOrgs || switchingOrg"
+              @click="orgMenuOpen = canSwitchOrgs ? !orgMenuOpen : false"
               class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition"
-              :class="isSuperAdmin ? 'hover:bg-gray-100' : 'cursor-default'"
+              :class="canSwitchOrgs ? 'hover:bg-gray-100' : 'cursor-default'"
             >
               <span
                 class="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white"
@@ -109,7 +131,7 @@ const userInitials = computed(() =>
                 {{ activeOrg?.name ?? "Caobo Recibos" }}
               </span>
               <svg
-                v-if="isSuperAdmin"
+                v-if="canSwitchOrgs"
                 class="h-4 w-4 text-gray-400 transition"
                 :class="orgMenuOpen ? 'rotate-180' : ''"
                 fill="none"
@@ -125,20 +147,20 @@ const userInitials = computed(() =>
               </svg>
             </button>
 
-            <!-- Superadmin org switcher dropdown -->
             <div
-              v-if="isSuperAdmin && orgMenuOpen"
+              v-if="canSwitchOrgs && orgMenuOpen"
               class="absolute left-4 right-4 top-full z-40 mt-1 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
             >
               <p class="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                Ver como organización
+                {{ isSuperAdmin ? "Ver como organización" : "Cambiar organización" }}
               </p>
               <button
-                v-for="org in allOrgs"
+                v-for="org in switchableOrgs"
                 :key="org.id"
                 type="button"
+                :disabled="switchingOrg"
                 @click="selectOrg(org.id)"
-                class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition"
+                class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition disabled:opacity-50"
                 :class="
                   org.id === activeOrg?.id
                     ? 'bg-emerald-50 text-emerald-700 font-medium'
@@ -147,7 +169,7 @@ const userInitials = computed(() =>
               >
                 <span class="truncate">{{ org.name }}</span>
               </button>
-              <p v-if="!allOrgs.length" class="px-3 py-2 text-sm text-gray-400">
+              <p v-if="!switchableOrgs.length" class="px-3 py-2 text-sm text-gray-400">
                 No hay organizaciones.
               </p>
             </div>
@@ -158,7 +180,7 @@ const userInitials = computed(() =>
             <div
               v-for="item in navWithTeam"
               :key="item.to"
-              :class="item.children ? 'group/flyout relative' : ''"
+              :class="item.children ? 'group/submenu' : ''"
             >
               <NuxtLink
                 :to="item.to"
@@ -257,7 +279,7 @@ const userInitials = computed(() =>
                 <!-- Chevron indicator for items with children -->
                 <svg
                   v-if="item.children"
-                  class="ml-auto h-3.5 w-3.5 text-gray-400 transition group-hover/flyout:rotate-180"
+                  class="ml-auto h-3.5 w-3.5 text-gray-400 transition group-hover/submenu:rotate-180"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -271,16 +293,16 @@ const userInitials = computed(() =>
                 </svg>
               </NuxtLink>
 
-              <!-- Flyout submenu (hover-based, CSS only) -->
+              <!-- Inline submenu — expands in flow and pushes items below -->
               <div
                 v-if="item.children"
-                class="absolute left-0 top-full z-50 hidden w-full flex-col overflow-hidden rounded-b-lg border border-t-0 border-gray-200 bg-white shadow-md group-hover/flyout:flex"
+                class="hidden flex-col group-hover/submenu:flex"
               >
                 <NuxtLink
                   v-for="child in item.children"
                   :key="child.to"
                   :to="child.to"
-                  class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition"
+                  class="flex items-center gap-2 rounded-lg py-2 pl-11 pr-3 text-sm font-medium transition"
                   :class="
                     isNavActive(child.to)
                       ? 'bg-emerald-50 text-emerald-700'

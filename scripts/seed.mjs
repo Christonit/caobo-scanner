@@ -9,13 +9,11 @@
 //   1. Creates two auth users (admin@example.com, member@example.com)
 //      with email_confirm = true so they can log in immediately.
 //   2. Ensures an organization "Demo Co" exists.
-//   3. Attaches each user to that org via public.user_profiles, with
-//      one as 'admin' and the other as 'member'.
+//   3. Attaches each user to that org via public.user_profiles (active org)
+//      and public.organization_members when the multi-org migration exists.
 //
-// Note: under the live schema, public.user_profiles.id is the primary
-// key (one user = one org). If a seed user is already attached to a
-// different org, their existing membership will be re-pointed to
-// "Demo Co" by this script.
+// Note: seeding re-points each seed user's *active* user_profiles row to
+// "Demo Co". Extra rows in organization_members are left alone.
 
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
@@ -147,6 +145,28 @@ async function ensureMembership(orgId, user, role, full_name) {
       { onConflict: "id" }
     );
   if (error) throw error;
+
+  // Best-effort: keep organization_members in sync when the multi-org
+  // migration has been applied. Ignore "relation does not exist".
+  const { error: memberErr } = await admin
+    .from("organization_members")
+    .upsert(
+      {
+        user_id: user.id,
+        organization_id: orgId,
+        role,
+      },
+      { onConflict: "user_id,organization_id" }
+    );
+  if (
+    memberErr &&
+    memberErr.code !== "PGRST205" &&
+    memberErr.code !== "42P01" &&
+    !/does not exist|Could not find the table/i.test(memberErr.message || "")
+  ) {
+    throw memberErr;
+  }
+
   console.log(`  · ${user.email} -> ${role}`);
 }
 

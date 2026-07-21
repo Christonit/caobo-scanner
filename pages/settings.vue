@@ -5,10 +5,12 @@ const supabase = useSupabaseClient<Database>();
 const user = useSupabaseUser();
 const {
   membership,
+  memberships,
   activeOrg,
   isAdmin,
   isSuperAdmin,
-  allOrgs,
+  switchableOrgs,
+  canSwitchOrgs,
   setActiveOrg,
   refresh,
 } = useOrganization();
@@ -75,11 +77,33 @@ async function resetOwnPassword() {
   }
 }
 
-// --- Organizaciones (admin / superadmin) -------------------------------------
-const orgList = computed(() => {
-  if (isSuperAdmin.value) return allOrgs.value;
-  return activeOrg.value ? [activeOrg.value] : [];
-});
+// --- Organizaciones ----------------------------------------------------------
+const orgList = computed(() => switchableOrgs.value);
+
+const roleLabel = (orgId: string) => {
+  if (isSuperAdmin.value) return "Superadmin";
+  const m = memberships.value.find((x) => x.organization_id === orgId);
+  if (!m) return null;
+  return m.role === "admin" ? "Administrador" : "Colaborador";
+};
+
+const switchingOrgId = ref<string | null>(null);
+const switchOrgError = ref<string | null>(null);
+
+async function switchToOrg(orgId: string) {
+  if (orgId === activeOrg.value?.id) return;
+  switchingOrgId.value = orgId;
+  switchOrgError.value = null;
+  try {
+    await setActiveOrg(orgId);
+    await refreshNuxtData();
+  } catch (err: any) {
+    switchOrgError.value =
+      err?.message || "No se pudo cambiar de organización.";
+  } finally {
+    switchingOrgId.value = null;
+  }
+}
 
 // --- Equipo (admin / superadmin) ---------------------------------------------
 interface MemberRow {
@@ -144,7 +168,7 @@ async function submitInvite() {
   inviteSubmitting.value = true;
   try {
     const sentEmail = inviteEmail.value.trim();
-    await $fetch("/api/team/invite", {
+    const result = await $fetch<{ existing?: boolean }>("/api/team/invite", {
       method: "POST",
       body: {
         email: sentEmail,
@@ -153,7 +177,9 @@ async function submitInvite() {
         organizationId: activeOrg.value?.id,
       },
     });
-    inviteSuccess.value = `Invitación enviada a ${sentEmail}.`;
+    inviteSuccess.value = result.existing
+      ? `${sentEmail} ya tenía cuenta; se agregó a esta organización.`
+      : `Invitación enviada a ${sentEmail}.`;
     inviteEmail.value = "";
     inviteFullName.value = "";
     inviteRole.value = "collaborator";
@@ -329,19 +355,21 @@ const {
         </div>
       </section>
 
-      <!-- Organizaciones -->
+      <!-- Organizaciones — visible for every member (and superadmins) -->
       <section
-        v-if="isAdmin"
+        v-if="membership || isSuperAdmin"
         class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
       >
         <h2 class="text-base font-semibold text-gray-900">
-          {{ isSuperAdmin ? "Organizaciones" : "Organización" }}
+          {{ canSwitchOrgs || isSuperAdmin ? "Organizaciones" : "Organización" }}
         </h2>
         <p class="mt-1 text-sm text-gray-500">
           {{
             isSuperAdmin
-              ? "Organizaciones que administras como superadmin."
-              : "La organización que administras."
+              ? "Organizaciones que puedes administrar como superadmin."
+              : canSwitchOrgs
+                ? "Organizaciones a las que perteneces. Cambia la activa desde aquí o desde la barra lateral."
+                : "La organización a la que perteneces."
           }}
         </p>
 
@@ -351,36 +379,43 @@ const {
             :key="org.id"
             class="flex items-center justify-between gap-3 py-3"
           >
-            <div class="flex items-center gap-2.5">
+            <div class="flex items-center gap-2.5 min-w-0">
               <span
                 class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white"
               >
                 {{ org.name.charAt(0).toUpperCase() }}
               </span>
-              <div>
-                <p class="text-sm font-medium text-gray-900">{{ org.name }}</p>
-                <p class="text-xs text-gray-400">{{ org.slug }}</p>
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium text-gray-900">{{ org.name }}</p>
+                <p class="text-xs text-gray-400">
+                  <span v-if="roleLabel(org.id)">{{ roleLabel(org.id) }} · </span>
+                  {{ org.slug }}
+                </p>
               </div>
             </div>
             <span
               v-if="org.id === activeOrg?.id"
-              class="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700"
+              class="flex-shrink-0 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700"
             >
               Viendo ahora
             </span>
             <button
-              v-else-if="isSuperAdmin"
+              v-else-if="canSwitchOrgs"
               type="button"
-              class="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50"
-              @click="setActiveOrg(org.id)"
+              :disabled="switchingOrgId === org.id"
+              class="flex-shrink-0 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50 disabled:opacity-50"
+              @click="switchToOrg(org.id)"
             >
-              Ver esta organización
+              {{ switchingOrgId === org.id ? "Cambiando…" : "Usar esta" }}
             </button>
           </li>
           <li v-if="!orgList.length" class="py-3 text-sm text-gray-400">
             No hay organizaciones.
           </li>
         </ul>
+        <p v-if="switchOrgError" class="mt-2 text-sm text-red-600">
+          {{ switchOrgError }}
+        </p>
       </section>
 
       <!-- Equipo -->

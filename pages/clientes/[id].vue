@@ -40,6 +40,7 @@ const {
 } = useClientSuplidores();
 const { getByClient: getTaxColumnMapping, upsert: upsertTaxColumnMapping } =
   useClientTaxColumnMapping();
+const { log: logActivity } = useActivityLog();
 
 type Tab = "documentos" | "reglas" | "suplidores" | "impuestos";
 const activeTab = ref<Tab>("documentos");
@@ -210,6 +211,11 @@ async function onCreate(input: ClientDocumentInput) {
     expandedIds.value = new Set([...expandedIds.value, created.id]);
     showForm.value = false;
     editingDoc.value = null;
+    logActivity("document_added", {
+      clientId: clientId.value,
+      targetLabel: client.value?.name ?? null,
+      metadata: { name: created.document_name },
+    });
   } catch (err: any) {
     formError.value = err?.message || "No se pudo crear el documento.";
   } finally {
@@ -228,6 +234,11 @@ async function onUpdate(input: ClientDocumentInput) {
     );
     showForm.value = false;
     editingDoc.value = null;
+    logActivity("document_updated", {
+      clientId: clientId.value,
+      targetLabel: client.value?.name ?? null,
+      metadata: { name: updated.document_name },
+    });
   } catch (err: any) {
     formError.value = err?.message || "No se pudo actualizar el documento.";
   } finally {
@@ -255,6 +266,11 @@ async function onDelete(doc: ClientDocumentWithAttributes) {
   try {
     await remove(doc.id);
     documents.value = documents.value.filter((d) => d.id !== doc.id);
+    logActivity("document_removed", {
+      clientId: clientId.value,
+      targetLabel: client.value?.name ?? null,
+      metadata: { name: doc.document_name },
+    });
   } catch (err: any) {
     error.value = err?.message || "No se pudo eliminar el documento.";
   } finally {
@@ -344,6 +360,11 @@ async function onCreateRule(input: ClientBusinessRuleInput) {
     ruleExpandedIds.value = new Set([...ruleExpandedIds.value, created.id]);
     showRuleForm.value = false;
     editingRule.value = null;
+    logActivity("annotation_added", {
+      clientId: clientId.value,
+      targetLabel: client.value?.name ?? null,
+      metadata: { name: created.rule_name },
+    });
   } catch (err: any) {
     ruleFormError.value = err?.message || "No se pudo crear la regla.";
   } finally {
@@ -362,6 +383,11 @@ async function onUpdateRule(input: ClientBusinessRuleInput) {
     );
     showRuleForm.value = false;
     editingRule.value = null;
+    logActivity("annotation_updated", {
+      clientId: clientId.value,
+      targetLabel: client.value?.name ?? null,
+      metadata: { name: updated.rule_name },
+    });
   } catch (err: any) {
     ruleFormError.value = err?.message || "No se pudo actualizar la regla.";
   } finally {
@@ -389,6 +415,11 @@ async function onDeleteRule(rule: ClientBusinessRuleWithAttributes) {
   try {
     await removeRule(rule.id);
     businessRules.value = businessRules.value.filter((r) => r.id !== rule.id);
+    logActivity("annotation_removed", {
+      clientId: clientId.value,
+      targetLabel: client.value?.name ?? null,
+      metadata: { name: rule.rule_name },
+    });
   } catch (err: any) {
     error.value = err?.message || "No se pudo eliminar la regla.";
   } finally {
@@ -494,9 +525,19 @@ async function onSubmitSuplidor() {
       suplidores.value = suplidores.value.map((s) =>
         s.id === updated.id ? updated : s,
       );
+      logActivity("suplidor_updated", {
+        clientId: clientId.value,
+        targetLabel: client.value?.name ?? null,
+        metadata: { nombre: updated.nombre },
+      });
     } else {
       const created = await createSuplidor(clientId.value, suplidorDraft.value);
       suplidores.value = [created, ...suplidores.value];
+      logActivity("suplidor_added", {
+        clientId: clientId.value,
+        targetLabel: client.value?.name ?? null,
+        metadata: { nombre: created.nombre },
+      });
     }
     showSuplidorForm.value = false;
     editingSuplidor.value = null;
@@ -513,6 +554,11 @@ async function onDeleteSuplidor(s: ClientSuplidor) {
   try {
     await removeSuplidor(s.id);
     suplidores.value = suplidores.value.filter((x) => x.id !== s.id);
+    logActivity("suplidor_removed", {
+      clientId: clientId.value,
+      targetLabel: client.value?.name ?? null,
+      metadata: { nombre: s.nombre },
+    });
   } catch (err: any) {
     suplidorFormError.value =
       err?.message || "No se pudo eliminar el suplidor.";

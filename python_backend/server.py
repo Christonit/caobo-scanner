@@ -5,6 +5,7 @@ Suplidores (suppliers) routes live in suplidores_server.py and are mounted
 via app.include_router() at the bottom of this file.
 """
 import asyncio
+import token
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -19,13 +20,22 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 
 from shared_utils import (
+    GEMINI_MAX_CONCURRENT,
     PDF_MAX_PAGES,
     PDF_RENDER_DPI,
     _is_retryable_error,
-    _strip_markdown_fences,
+    _parse_json_loose,
     gemini_semaphore,
+    generate_inference_content,
+    get_thinking_level_models,
     load_file_as_images,
     render_pdf_to_images,
+    resolve_inference_model,
+)
+from token_usage import (
+    merge_usage_records,
+    record_usage_from_response,
+    resolve_thinking_level,
 )
 from xls_template import fill_gastos_xls_template
 
@@ -141,35 +151,11 @@ if not HISTORY_FILE.exists():
     with open(HISTORY_FILE, 'w') as f:
         json.dump([], f)
 
-# Model selection.
-# - INDIVIDUAL calls (single-file /upload, retry, reevaluate) use gemma-4-26b
-#   (15 RPM on the free tier) so the UI can comfortably allow up to ~15 manual
-#   actions per minute.
-# - BATCH calls (/upload-batch, used by "Process All Files") use gemini-3.5-flash
-#   which handles many images per generate_content call well. NOTE: it is
-#   capped at 5 RPM on the free tier, so the frontend tracks batch requests
-#   in its own localStorage bucket and disables the button after 5 calls/min.
-INDIVIDUAL_MODEL = "gemma-4-26b-a4b-it"
-# INDIVIDUAL_MODEL = "gemini-3.1-flash-lite"
-# BATCH_MODEL = "gemini-3.5-flash"
-BATCH_MODEL = "gemini-3.1-flash-lite"
-
-
-def _log_gemini_prompt(label: str, content_parts: list) -> None:
-    """Print the full text prompt sent to Gemini (images are counted, not dumped)."""
-    text_parts: list[str] = []
-    image_count = 0
-    for part in content_parts:
-        if isinstance(part, str):
-            text_parts.append(part)
-        else:
-            image_count += 1
-
-    full_prompt = "\n".join(text_parts)
-    print(f"[DEBUG] [{label}] Full Gemini prompt ({len(full_prompt)} chars, {image_count} image(s)):")
-    print("=" * 80)
-    print(full_prompt)
-    print("=" * 80)
+# Default models when the client does not send a thinking-level `model`.
+# Rapido → 3.1-flash-lite, Moderado → 3.5-flash-lite, Profundo → 3.6-flash.
+_LEVEL_MODELS = get_thinking_level_models()
+INDIVIDUAL_MODEL = _LEVEL_MODELS["rapido"]
+BATCH_MODEL = _LEVEL_MODELS["moderado"]
 
 
 def list_available_gemini_models(*, generate_content_only: bool = True) -> list[dict]:
@@ -1180,7 +1166,7 @@ def _empty_gastos_extracted(filename: str, descripcion: str = "") -> dict:
 
 
 # _is_retryable_error, PDF_MAX_PAGES, PDF_RENDER_DPI, render_pdf_to_images,
-# load_file_as_images, _strip_markdown_fences, and gemini_semaphore are
+# load_file_as_images, _parse_json_loose, and gemini_semaphore are
 # imported from shared_utils at the top of this file.
 
 
@@ -1195,13 +1181,23 @@ def process_gastos_with_gemini(
     business_rules: Optional[list[dict]] = None,
     tipo_de_gasto_context: Optional[list[dict]] = None,
     tipo_de_gasto_document_comment: str = "",
-) -> dict:
+    model_name: Optional[str] = None,
+    spend_ctx: Optional[dict] = None,
+) -> Tuple[dict, Optional[dict]]:
     """
-    Process a single file (image or PDF) with the individual Gemma model.
+    Process a single file (image or PDF) with the selected vision model.
     Extracts receipt/invoice data according to Dominican Republic accounting
     standards. PDFs are rasterized to images first so vision-only models
     (Gemma) can process them. Includes retry logic for rate limiting and
     transient errors.
+
+    Returns (extracted_data, usage_record_or_None).
+
+    model_name: optional client-selected model (thinking level). Falls back
+    to INDIVIDUAL_MODEL when omitted or not whitelisted.
+
+    spend_ctx: optional {thinking_level, organization_id, user_id, client_id}
+    used to price and persist token usage after a successful Gemini call.
 
     concepto_catalog / tipo_de_pago_catalog: optional per-client lists of
     {document_type, document_id, description} (already cleaned via
@@ -1224,7 +1220,8 @@ def process_gastos_with_gemini(
     new tipo_de_gasto values.
     """
     import time
-    import re
+
+    model_id = resolve_inference_model(model_name, default=INDIVIDUAL_MODEL)
 
     catalog_block = _build_gastos_catalog_prompt_block(
         concepto_catalog or [], tipo_de_pago_catalog or [],
@@ -1238,20 +1235,20 @@ def process_gastos_with_gemini(
 
     print(
         f"[INFO] [GEMINI-SINGLE] Starting processing for '{filename}' "
-        f"({len(file_content)} bytes, model={INDIVIDUAL_MODEL})"
+        f"({len(file_content)} bytes, model={model_id})"
     )
 
     # Check if API key is configured
     if not GEMINI_API_KEY:
         print(f"[ERROR] [GEMINI-SINGLE] Cannot process {filename}: GEMINI_API_KEY not configured")
-        return _empty_gastos_extracted(filename, descripcion="ERROR: API key not configured")
+        return _empty_gastos_extracted(filename, descripcion="ERROR: API key not configured"), None
 
     file_extension = Path(filename).suffix.lower() if filename else ""
     if file_extension not in (".png", ".jpg", ".jpeg", ".pdf"):
         print(f"[ERROR] [GEMINI-SINGLE] Unsupported file type: {file_extension}")
         return _empty_gastos_extracted(
             filename, descripcion=f"Unsupported file type: {file_extension}"
-        )
+        ), None
 
     page_images = load_file_as_images(file_content, filename)
     print(f"[DEBUG] [GEMINI-SINGLE] '{filename}': loaded {len(page_images)} page image(s)")
@@ -1264,7 +1261,7 @@ def process_gastos_with_gemini(
                 if file_extension == ".pdf"
                 else "Could not open image"
             ),
-        )
+        ), None
 
     if file_extension == ".pdf" and len(page_images) > 1:
         prompt = (
@@ -1287,35 +1284,50 @@ def process_gastos_with_gemini(
         try:
             print(
                 f"[INFO] [GEMINI-SINGLE] '{filename}': calling Gemini "
-                f"(attempt {attempt + 1}/{max_retries}, model={INDIVIDUAL_MODEL}, "
+                f"(attempt {attempt + 1}/{max_retries}, model={model_id}, "
                 f"images={len(page_images)}, prompt_chars={len(prompt)})"
             )
-            model = genai.GenerativeModel(INDIVIDUAL_MODEL)
             content_parts = [prompt, *page_images]
-            _log_gemini_prompt(f"GEMINI-SINGLE '{filename}'", content_parts)
-            response = model.generate_content(content_parts)
-            print(f"[DEBUG] [GEMINI-SINGLE] '{filename}': received response from Gemini API")
-
-            if not response or not hasattr(response, "text") or not response.text:
-                raise ValueError("Empty response from Gemini API")
-
-            print(
-                f"[DEBUG] [GEMINI-SINGLE] '{filename}': raw response "
-                f"({len(response.text)} chars): {response.text[:500]!r}"
+            ctx = spend_ctx or {}
+            level = ctx.get("thinking_level") or resolve_thinking_level(
+                None, model_id
             )
 
-            response_text = _strip_markdown_fences(response.text)
+            # Structured JSON for all levels; moderado also sends thinkingBudget.
+            response = generate_inference_content(
+                model_id,
+                content_parts,
+                thinking_level=level,
+                max_output_tokens=4096,
+                temperature=0.1,
+            )
 
-            try:
-                extracted_data = json.loads(response_text)
-            except json.JSONDecodeError:
-                json_match = re.search(
-                    r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL
+            if not response or not getattr(response, "text", None):
+                raise ValueError("Empty response from Gemini API")
+
+            usage_record = record_usage_from_response(
+                response,
+                model=model_id,
+                source="gastos_single",
+                thinking_level=level,
+                organization_id=ctx.get("organization_id"),
+                user_id=ctx.get("user_id"),
+                client_id=ctx.get("client_id"),
+                metadata={"filename": filename},
+            )
+
+            extracted_data = _parse_json_loose(response.text)
+            if isinstance(extracted_data, list):
+                # Rare: model returns a 1-element array instead of an object.
+                extracted_data = next(
+                    (item for item in extracted_data if isinstance(item, dict)),
+                    {},
                 )
-                if json_match:
-                    extracted_data = json.loads(json_match.group())
-                else:
-                    raise ValueError("Could not parse JSON from response")
+            if not isinstance(extracted_data, dict):
+                raise ValueError(
+                    f"Expected JSON object from single response, got "
+                    f"{type(extracted_data).__name__}"
+                )
 
             normalized = _normalize_gastos_extracted(
                 extracted_data, filename,
@@ -1337,7 +1349,7 @@ def process_gastos_with_gemini(
                     f"may be blank/unreadable, or the file sent doesn't match "
                     f"what was expected."
                 )
-            return normalized
+            return normalized, usage_record
 
         except Exception as e:
             last_error = e
@@ -1352,7 +1364,67 @@ def process_gastos_with_gemini(
                 break
 
     print(f"[ERROR] [GEMINI-SINGLE] Gemini processing failed for {filename}: {last_error}")
-    return _empty_gastos_extracted(filename)
+    return _empty_gastos_extracted(filename), None
+
+
+def _process_gastos_files_parallel(
+    files: List[Tuple[bytes, str]],
+    *,
+    concepto_catalog: Optional[list[dict]] = None,
+    tipo_de_pago_catalog: Optional[list[dict]] = None,
+    concepto_document_comment: str = "",
+    tipo_de_pago_document_comment: str = "",
+    business_rules: Optional[list[dict]] = None,
+    tipo_de_gasto_context: Optional[list[dict]] = None,
+    tipo_de_gasto_document_comment: str = "",
+    model_name: Optional[str] = None,
+    spend_ctx: Optional[dict] = None,
+) -> Tuple[List[dict], Optional[dict]]:
+    """
+    Process each file with process_gastos_with_gemini in parallel (capped by
+    GEMINI_MAX_CONCURRENT). Preserves input order in the returned results.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    if not files:
+        return [], None
+
+    results: List[Optional[dict]] = [None] * len(files)
+    usages: List[dict] = []
+
+    def _run(index: int, content: bytes, filename: str):
+        return index, process_gastos_with_gemini(
+            content,
+            filename,
+            concepto_catalog=concepto_catalog,
+            tipo_de_pago_catalog=tipo_de_pago_catalog,
+            concepto_document_comment=concepto_document_comment,
+            tipo_de_pago_document_comment=tipo_de_pago_document_comment,
+            business_rules=business_rules,
+            tipo_de_gasto_context=tipo_de_gasto_context,
+            tipo_de_gasto_document_comment=tipo_de_gasto_document_comment,
+            model_name=model_name,
+            spend_ctx=spend_ctx,
+        )
+
+    workers = min(GEMINI_MAX_CONCURRENT, len(files))
+    print(
+        f"[INFO] [GEMINI-PARALLEL] Processing {len(files)} file(s) with "
+        f"{workers} worker(s), model={resolve_inference_model(model_name, default=INDIVIDUAL_MODEL)}"
+    )
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [
+            pool.submit(_run, i, content, filename)
+            for i, (content, filename) in enumerate(files)
+        ]
+        for fut in as_completed(futures):
+            index, (data, usage) = fut.result()
+            results[index] = data
+            if usage:
+                usages.append(usage)
+
+    ordered = [r if r is not None else _empty_gastos_extracted(fn) for r, (_, fn) in zip(results, files)]
+    return ordered, merge_usage_records(usages)
 
 
 def process_gastos_batch_with_gemini(
@@ -1365,14 +1437,24 @@ def process_gastos_batch_with_gemini(
     business_rules: Optional[list[dict]] = None,
     tipo_de_gasto_context: Optional[list[dict]] = None,
     tipo_de_gasto_document_comment: str = "",
-) -> List[dict]:
+    model_name: Optional[str] = None,
+    spend_ctx: Optional[dict] = None,
+) -> Tuple[List[dict], Optional[dict]]:
     """
-    Process MULTIPLE files (images and/or PDFs) with the batch Gemini model in
-    a SINGLE API call.
+    Process MULTIPLE files (images and/or PDFs) with the selected vision model
+    in a SINGLE API call.
+
+    Returns (results, usage_record_or_None).
 
     files: list of (file_content, filename) tuples. Supports png/jpg/jpeg and
     pdf - PDFs are rasterized to images on the fly. Each file becomes ONE entry
     in the result list, even if its PDF spans multiple pages.
+
+    model_name: optional client-selected model (thinking level). Falls back
+    to BATCH_MODEL when omitted or not whitelisted.
+
+    spend_ctx: optional {thinking_level, organization_id, user_id, client_id}
+    used to price and persist token usage after a successful Gemini call.
 
     concepto_catalog / tipo_de_pago_catalog: optional per-client lists of
     {document_type, document_id, description} used to classify every
@@ -1394,22 +1476,45 @@ def process_gastos_batch_with_gemini(
     Returns a list of normalized extracted-data dicts in the same order as
     input. Falls back to per-file processing if the batch call cannot be parsed
     back into the expected number of items.
+
+    Gemma is unreliable at multi-doc JSON arrays, so multi-file Gemma requests
+    skip the single-shot batch and run parallel per-file calls instead.
     """
     import time
-    import re
 
     if not files:
-        return []
+        return [], None
 
-    print(
-        f"[INFO] [GEMINI-BATCH] Starting batch of {len(files)} file(s) "
-        f"(model={BATCH_MODEL}): {[fn for _, fn in files]}"
+    model_id = resolve_inference_model(model_name, default=BATCH_MODEL)
+
+    parallel_kwargs = dict(
+        concepto_catalog=concepto_catalog,
+        tipo_de_pago_catalog=tipo_de_pago_catalog,
+        concepto_document_comment=concepto_document_comment,
+        tipo_de_pago_document_comment=tipo_de_pago_document_comment,
+        business_rules=business_rules,
+        tipo_de_gasto_context=tipo_de_gasto_context,
+        tipo_de_gasto_document_comment=tipo_de_gasto_document_comment,
+        model_name=model_id,
+        spend_ctx=spend_ctx,
     )
+
+    # Gemma often emits junk before/around multi-doc JSON arrays (Extra data),
+    # which forces a slow sequential fallback. Prefer parallel singles up front.
+    if len(files) > 1 and model_id.startswith("gemma"):
+        print(
+            f"[INFO] [GEMINI-BATCH] model={model_id} is Gemma — skipping multi-doc "
+            f"batch API; using parallel per-file for {len(files)} file(s)"
+        )
+        return _process_gastos_files_parallel(files, **parallel_kwargs)
 
     if not GEMINI_API_KEY:
         print("[ERROR] [GEMINI-BATCH] Cannot process batch: GEMINI_API_KEY not configured")
-        return [_empty_gastos_extracted(fn, descripcion="ERROR: API key not configured")
-                for _, fn in files]
+        return (
+            [_empty_gastos_extracted(fn, descripcion="ERROR: API key not configured")
+             for _, fn in files],
+            None,
+        )
 
     # Render each file to its page-image list up front so we can fail fast on
     # unreadable files and so the per-document prompt knows the page counts.
@@ -1476,8 +1581,6 @@ def process_gastos_batch_with_gemini(
 
     for attempt in range(max_retries):
         try:
-            model = genai.GenerativeModel(BATCH_MODEL)
-
             # Build the content list: prompt + per-document blocks. Each
             # document gets a header followed by ALL its page images.
             content_parts: list = [batch_prompt]
@@ -1498,34 +1601,43 @@ def process_gastos_batch_with_gemini(
             image_part_count = sum(1 for p in content_parts if not isinstance(p, str))
             print(
                 f"[INFO] [GEMINI-BATCH] Calling Gemini (attempt {attempt + 1}/"
-                f"{max_retries}, model={BATCH_MODEL}, content_parts="
+                f"{max_retries}, model={model_id}, content_parts="
                 f"{len(content_parts)}, image_parts={image_part_count}, "
                 f"prompt_chars={len(batch_prompt)})"
             )
 
-            _log_gemini_prompt("GEMINI-BATCH", content_parts)
-
-            response = model.generate_content(content_parts)
-            print(f"[DEBUG] [GEMINI-BATCH] Received response from Gemini API")
-
-            if not response or not hasattr(response, 'text') or not response.text:
-                raise ValueError("Empty response from Gemini API")
-
-            print(
-                f"[DEBUG] [GEMINI-BATCH] Raw response ({len(response.text)} chars): "
-                f"{response.text[:800]!r}"
+            # ~300-400 tokens/doc; keep headroom for larger batches.
+            max_out = min(16384, max(4096, 512 * len(files)))
+            ctx = spend_ctx or {}
+            level = ctx.get("thinking_level") or resolve_thinking_level(
+                None, model_id
+            )
+            response = generate_inference_content(
+                model_id,
+                content_parts,
+                thinking_level=level,
+                max_output_tokens=max_out,
+                temperature=0.1,
             )
 
-            response_text = _strip_markdown_fences(response.text)
+            if not response or not getattr(response, "text", None):
+                raise ValueError("Empty response from Gemini API")
 
-            try:
-                parsed = json.loads(response_text)
-            except json.JSONDecodeError:
-                array_match = re.search(r'\[.*\]', response_text, re.DOTALL)
-                if array_match:
-                    parsed = json.loads(array_match.group())
-                else:
-                    raise ValueError("Could not parse JSON array from batch response")
+            usage_record = record_usage_from_response(
+                response,
+                model=model_id,
+                source="gastos_batch",
+                thinking_level=level,
+                organization_id=ctx.get("organization_id"),
+                user_id=ctx.get("user_id"),
+                client_id=ctx.get("client_id"),
+                metadata={
+                    "file_count": len(files),
+                    "filenames": [fn for _, fn in files],
+                },
+            )
+
+            parsed = _parse_json_loose(response.text)
 
             if isinstance(parsed, dict):
                 parsed = [parsed]
@@ -1568,7 +1680,7 @@ def process_gastos_batch_with_gemini(
                     )
                     results.append(_empty_gastos_extracted(filename))
             print(f"[INFO] [GEMINI-BATCH] Batch completed: {len(results)} result(s)")
-            return results
+            return results, usage_record
 
         except Exception as e:
             last_error = e
@@ -1583,21 +1695,12 @@ def process_gastos_batch_with_gemini(
                 break
 
     print(f"[ERROR] [GEMINI-BATCH] Gemini batch processing failed: {last_error}")
-    # Fall back to per-file processing so a single bad image doesn't fail the whole batch.
-    print(f"[INFO] [GEMINI-BATCH] Falling back to per-file processing for {len(files)} files")
-    return [
-        process_gastos_with_gemini(
-            content, filename,
-            concepto_catalog=concepto_catalog,
-            tipo_de_pago_catalog=tipo_de_pago_catalog,
-            concepto_document_comment=concepto_document_comment,
-            tipo_de_pago_document_comment=tipo_de_pago_document_comment,
-            business_rules=business_rules,
-            tipo_de_gasto_context=tipo_de_gasto_context,
-            tipo_de_gasto_document_comment=tipo_de_gasto_document_comment,
-        )
-        for content, filename in files
-    ]
+    # Fall back to parallel per-file so a bad batch parse doesn't serialize N calls.
+    print(
+        f"[INFO] [GEMINI-BATCH] Falling back to parallel per-file processing "
+        f"for {len(files)} files"
+    )
+    return _process_gastos_files_parallel(files, **parallel_kwargs)
 
 
 def _fill_gastos_template_xls(rows: list, tax_column_mapping: Optional[dict] = None) -> Path:
@@ -1644,6 +1747,26 @@ def populate_gastos_excel_template(data: dict, tax_column_mapping: Optional[dict
 async def root():
     """Health check endpoint"""
     return {"status": "ok", "message": "Receipt Processing API is running"}
+
+
+@app.get("/thinking-levels")
+async def get_thinking_levels():
+    """
+    Return the thinking-speed → Gemini model map from server ENV.
+
+    Used by the UI selector so frontend model ids stay in sync with
+    THINKING_LEVEL_*_MODEL without hardcoding them in the client.
+    """
+    models = get_thinking_level_models()
+    return {
+        "default": "moderado",
+        "models": models,
+        "levels": [
+            {"value": level, "model": models[level]}
+            for level in ("rapido", "moderado", "profundo")
+            if level in models
+        ],
+    }
 
 
 @app.get("/models")
@@ -1693,9 +1816,21 @@ async def upload_file(
     tipo_de_gasto_context: Optional[str] = Form(None),
     tipo_de_gasto_document_comment: Optional[str] = Form(""),
     tax_column_mapping: Optional[str] = Form(None),
+    model: Optional[str] = Form(None),
+    thinking_level: Optional[str] = Form(None),
+    user_id: Optional[str] = Form(None),
+    organization_id: Optional[str] = Form(None),
+    client_id: Optional[str] = Form(None),
 ):
     """
     Upload and process a receipt/invoice file (supports: PDF, PNG, JPG, JPEG).
+
+    model: optional Gemini/Gemma model id from the UI thinking-level selector.
+    Whitelisted values only; falls back to INDIVIDUAL_MODEL.
+
+    thinking_level / user_id / organization_id / client_id: optional spend
+    attribution. When organization_id + user_id are set (and Supabase ENV is
+    configured), token usage is persisted to api_token_usage.
 
     concepto_catalog / tipo_de_pago_catalog: optional JSON-encoded arrays of
     {document_type, document_id, description} for the client currently being
@@ -1741,10 +1876,20 @@ async def upload_file(
         
         file_content = await file.read()
         file_hash = calculate_file_hash(file_content)
+        level = resolve_thinking_level(thinking_level, model)
+        model_id = resolve_inference_model(
+            model, default=INDIVIDUAL_MODEL, thinking_level=level,
+        )
+        spend_ctx = {
+            "thinking_level": level,
+            "user_id": (user_id or "").strip() or None,
+            "organization_id": (organization_id or "").strip() or None,
+            "client_id": (client_id or "").strip() or None,
+        }
         print(
             f"[INFO] [/upload] Received '{file.filename}' "
             f"({len(file_content)} bytes, content_type={file.content_type}, "
-            f"hash={file_hash[:8]})"
+            f"hash={file_hash[:8]}, model={model_id}, level={level})"
         )
 
         # NOTE: no duplicate detection here - this endpoint processes a
@@ -1771,7 +1916,7 @@ async def upload_file(
 
         # Process with Gemini (rate limited to 5 concurrent)
         async with gemini_semaphore:
-            extracted_data = await asyncio.to_thread(
+            extracted_data, usage_record = await asyncio.to_thread(
                 process_gastos_with_gemini, file_content, file.filename,
                 concepto_catalog=concepto_list,
                 tipo_de_pago_catalog=tipo_de_pago_list,
@@ -1780,6 +1925,8 @@ async def upload_file(
                 business_rules=business_rules_list,
                 tipo_de_gasto_context=tipo_de_gasto_context_list,
                 tipo_de_gasto_document_comment=tipo_de_gasto_comment,
+                model_name=model_id,
+                spend_ctx=spend_ctx,
             )
         
         print(f"[INFO] [/upload] '{file.filename}' processed, score={extracted_data.get('score')}")
@@ -1800,7 +1947,8 @@ async def upload_file(
             "status": "success",
             "message": f"File {file.filename} processed successfully",
             "data": extracted_data,
-            "hash": file_hash
+            "hash": file_hash,
+            "usage": usage_record,
         }
         
     except HTTPException:
@@ -1821,6 +1969,11 @@ async def upload_batch(
     tipo_de_gasto_context: Optional[str] = Form(None),
     tipo_de_gasto_document_comment: Optional[str] = Form(""),
     tax_column_mapping: Optional[str] = Form(None),
+    model: Optional[str] = Form(None),
+    thinking_level: Optional[str] = Form(None),
+    user_id: Optional[str] = Form(None),
+    organization_id: Optional[str] = Form(None),
+    client_id: Optional[str] = Form(None),
 ):
     """
     Upload and process MULTIPLE receipt/invoice files in a SINGLE Gemini API call.
@@ -1828,6 +1981,12 @@ async def upload_batch(
     Accepts up to ~10 files. Supported formats: PNG / JPG / JPEG / PDF. PDFs are
     rasterized to images (one image per page, capped at PDF_MAX_PAGES) and all
     pages of a PDF are still represented as ONE entry in the response.
+
+    model: optional Gemini/Gemma model id from the UI thinking-level selector.
+    Whitelisted values only; falls back to BATCH_MODEL.
+
+    thinking_level / user_id / organization_id / client_id: optional spend
+    attribution for api_token_usage persistence.
 
     concepto_catalog / tipo_de_pago_catalog: optional JSON-encoded arrays of
     {document_type, document_id, description} for the client currently being
@@ -1878,7 +2037,23 @@ async def upload_batch(
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
-    print(f"[INFO] [/upload-batch] Received request with {len(files)} file(s)")
+    model_id = resolve_inference_model(
+        model, default=BATCH_MODEL, thinking_level=thinking_level,
+    )
+    level = resolve_thinking_level(thinking_level, model_id)
+    spend_ctx = {
+        "thinking_level": level,
+        "user_id": (user_id or "").strip() or None,
+        "organization_id": (organization_id or "").strip() or None,
+        "client_id": (client_id or "").strip() or None,
+    }
+    print(
+        f"[INFO] [/upload-batch] Received request with {len(files)} file(s), "
+        f"model={model_id}, level={level}, "
+        f"org={'yes' if spend_ctx.get('organization_id') else 'no'}, "
+        f"user={'yes' if spend_ctx.get('user_id') else 'no'}, "
+        f"client={'yes' if spend_ctx.get('client_id') else 'no'}"
+    )
 
     allowed_extensions = {'.pdf', '.png', '.jpg', '.jpeg'}
 
@@ -1977,10 +2152,11 @@ async def upload_batch(
     tax_column_mapping_dict = _parse_tax_column_mapping_param(tax_column_mapping)
 
     extracted_results: List[dict] = []
+    usage_record: Optional[dict] = None
     if batch_inputs:
         # Reuse the same semaphore to coordinate concurrency with single uploads.
         async with gemini_semaphore:
-            extracted_results = await asyncio.to_thread(
+            extracted_results, usage_record = await asyncio.to_thread(
                 process_gastos_batch_with_gemini, batch_inputs,
                 concepto_catalog=concepto_list,
                 tipo_de_pago_catalog=tipo_de_pago_list,
@@ -1989,6 +2165,8 @@ async def upload_batch(
                 business_rules=business_rules_list,
                 tipo_de_gasto_context=tipo_de_gasto_context_list,
                 tipo_de_gasto_document_comment=tipo_de_gasto_comment,
+                model_name=model_id,
+                spend_ctx=spend_ctx,
             )
 
     history = load_history()
@@ -2062,14 +2240,13 @@ async def upload_batch(
 
     print(
         f"[INFO] [/upload-batch] Responding with {len(response_results)} "
-        f"result(s): "
-        f"{[(r['filename'], r['status']) for r in response_results]}"
     )
 
     return {
         "status": "success",
         "count": len(response_results),
         "results": response_results,
+        "usage": usage_record,
     }
 
 

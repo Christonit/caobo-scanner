@@ -11,6 +11,7 @@ export const useClients = () => {
   const supabase = useSupabaseClient<Database>();
   const user = useSupabaseUser();
   const { activeOrg, refresh } = useOrganization();
+  const { log } = useActivityLog();
 
   async function ensureOrgId(): Promise<string> {
     if (!activeOrg.value?.id) await refresh();
@@ -64,6 +65,13 @@ export const useClients = () => {
       .select("*")
       .single();
     if (error) throw error;
+
+    log("client_created", {
+      clientId: data.id,
+      targetLabel: data.name,
+      metadata: { tax_payer_id: data.tax_payer_id },
+    });
+
     return data as Client;
   }
 

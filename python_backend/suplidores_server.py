@@ -19,18 +19,27 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Optional
 
 import google.generativeai as genai
 import openpyxl
 from dotenv import load_dotenv
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
 from shared_utils import (
     _is_retryable_error,
     _strip_markdown_fences,
     gemini_semaphore,
+    generate_inference_content,
+    get_thinking_level_models,
     render_pdf_to_images,
+    resolve_inference_model,
+)
+from token_usage import (
+    merge_usage_records,
+    record_usage_from_response,
+    resolve_thinking_level,
 )
 from xls_template import fill_suplidores_xls_template
 
@@ -51,8 +60,11 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# Same model as gastos individual calls (15 RPM on free tier).
-SUPLIDOR_MODEL = os.getenv("SUPLIDOR_MODEL", "gemma-4-26b-a4b-it")
+# Default when the client does not send a thinking-level `model`.
+SUPLIDOR_MODEL = os.getenv(
+    "SUPLIDOR_MODEL",
+    get_thinking_level_models()["rapido"],
+)
 
 
 # ---------------------------------------------------------------------------
@@ -123,25 +135,45 @@ def _get_tipo_documento(documento: str) -> str:
     return "PASAPORTE"
 
 
-def _extract_suplidores_from_batch(images: list, batch_num: int) -> list[dict]:
+def _extract_suplidores_from_batch(
+    images: list,
+    batch_num: int,
+    model_name: str,
+    spend_ctx: Optional[dict] = None,
+) -> tuple[list[dict], Optional[dict]]:
     """
-    Send a batch of PIL images to Gemini and return raw suplidor dicts
-    {nombre, documento, tipo_de_factura}. Returns [] on any failure.
+    Send a batch of PIL images to Gemini and return (raw suplidor dicts,
+    usage_record). Returns ([], None) on any failure.
     """
     import time
 
-    model = genai.GenerativeModel(SUPLIDOR_MODEL)
     parts = [SUPLIDORES_BATCH_PROMPT] + images
+    ctx = spend_ctx or {}
+    level = ctx.get("thinking_level") or resolve_thinking_level(None, model_name)
 
     for attempt in range(3):
         try:
-            response = model.generate_content(
+            print(
+                f"[INFO] [suplidor-batch-{batch_num}] calling Gemini "
+                f"(attempt {attempt + 1}/3, model={model_name}, "
+                f"images={len(images)})"
+            )
+            response = generate_inference_content(
+                model_name,
                 parts,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json",
-                    max_output_tokens=1024,
-                    temperature=0.1,
-                ),
+                thinking_level=level,
+                max_output_tokens=1024,
+                temperature=0.1,
+            )
+            usage_record = record_usage_from_response(
+                response,
+                model=model_name,
+                source="suplidores_batch",
+                thinking_level=level,
+                organization_id=ctx.get("organization_id"),
+                user_id=ctx.get("user_id"),
+                client_id=ctx.get("client_id"),
+                metadata={"batch_num": batch_num, "images": len(images)},
             )
             raw = _strip_markdown_fences(response.text or "")
             data = json.loads(raw)
@@ -163,37 +195,43 @@ def _extract_suplidores_from_batch(images: list, batch_num: int) -> list[dict]:
                         "tipo_de_factura": tipo,
                     })
             print(f"[DEBUG] [suplidor-batch-{batch_num}] found {len(result)} suplidores")
-            return result
+            return result, usage_record
 
         except Exception as e:
             print(f"[ERROR] [suplidor-batch-{batch_num}] attempt {attempt + 1}: {e}")
             if attempt < 2 and _is_retryable_error(e):
                 time.sleep(2 ** attempt)
 
-    return []
+    return [], None
 
 
-def extract_suplidores_from_file(file_content: bytes, filename: str) -> dict:
+def extract_suplidores_from_file(
+    file_content: bytes,
+    filename: str,
+    model_name: Optional[str] = None,
+    spend_ctx: Optional[dict] = None,
+) -> dict:
     """
     Render all pages of a PDF (or a single image) and process them in batches
     through Gemini to extract every unique suplidor in the document.
 
+    model_name: optional client-selected model (thinking level). Falls back
+    to SUPLIDOR_MODEL when omitted or not whitelisted.
+
     Returns:
         {
             "page_count": int,
-            "suplidores": [
-                {
-                    "nombre": str,
-                    "documento": str,          # digits only, max 20
-                    "tipo_de_documento": str,  # RNC | CEDULA | PASAPORTE | ""
-                    "tipo_de_factura": str,
-                },
-                ...
-            ]
+            "suplidores": [...],
+            "usage": {...} | None,
         }
     """
     if not GEMINI_API_KEY:
-        return {"page_count": 0, "suplidores": []}
+        return {"page_count": 0, "suplidores": [], "usage": None}
+
+    level = (spend_ctx or {}).get("thinking_level")
+    model_id = resolve_inference_model(
+        model_name, default=SUPLIDOR_MODEL, thinking_level=level,
+    )
 
     ext = Path(filename).suffix.lower() if filename else ""
     if ext == ".pdf":
@@ -206,20 +244,28 @@ def extract_suplidores_from_file(file_content: bytes, filename: str) -> dict:
             all_images = [img]
         except Exception as e:
             print(f"[ERROR] [scan-suplidores] Could not open image {filename}: {e}")
-            return {"page_count": 0, "suplidores": []}
+            return {"page_count": 0, "suplidores": [], "usage": None}
 
     page_count = len(all_images)
-    print(f"[INFO] [scan-suplidores] '{filename}': {page_count} page(s) to process")
+    print(
+        f"[INFO] [scan-suplidores] '{filename}': {page_count} page(s) to process "
+        f"(model={model_id})"
+    )
 
     if not all_images:
-        return {"page_count": 0, "suplidores": []}
+        return {"page_count": 0, "suplidores": [], "usage": None}
 
     all_rows: list[dict] = []
+    usages: list[dict] = []
     for i in range(0, len(all_images), SUPLIDOR_BATCH_SIZE):
         batch = all_images[i: i + SUPLIDOR_BATCH_SIZE]
         batch_num = i // SUPLIDOR_BATCH_SIZE + 1
-        rows = _extract_suplidores_from_batch(batch, batch_num)
+        rows, usage = _extract_suplidores_from_batch(
+            batch, batch_num, model_id, spend_ctx=spend_ctx,
+        )
         all_rows.extend(rows)
+        if usage:
+            usages.append(usage)
 
     # Deduplicate: prefer the first occurrence of each (documento OR nombre) key.
     seen_docs: set[str] = set()
@@ -245,10 +291,14 @@ def extract_suplidores_from_file(file_content: bytes, filename: str) -> dict:
         })
 
     print(
-        f"[INFO] [scan-suplidores] '{filename}': {len(unique)} unique suplidor(s) "
+        f"[INFO] [scan-suplidores] '{filename}': {len(unique)} unique suplidor(es) "
         f"from {page_count} page(s)"
     )
-    return {"page_count": page_count, "suplidores": unique}
+    return {
+        "page_count": page_count,
+        "suplidores": unique,
+        "usage": merge_usage_records(usages),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -298,9 +348,22 @@ router = APIRouter()
 
 
 @router.post("/scan-suplidores")
-async def scan_suplidores(file: UploadFile = File(...)):
+async def scan_suplidores(
+    file: UploadFile = File(...),
+    model: Optional[str] = Form(None),
+    thinking_level: Optional[str] = Form(None),
+    user_id: Optional[str] = Form(None),
+    organization_id: Optional[str] = Form(None),
+    client_id: Optional[str] = Form(None),
+):
     """
     Extract all unique suplidores from a PDF (all pages, batched) or image.
+
+    model: optional Gemini/Gemma model id from the UI thinking-level selector.
+    Whitelisted values only; falls back to SUPLIDOR_MODEL.
+
+    thinking_level / user_id / organization_id / client_id: optional spend
+    attribution for api_token_usage persistence.
 
     Returns:
         {
@@ -308,7 +371,8 @@ async def scan_suplidores(file: UploadFile = File(...)):
             "suplidores": [
                 {"nombre", "documento", "tipo_de_documento", "tipo_de_factura"},
                 ...
-            ]
+            ],
+            "usage": {...} | null,
         }
     """
     allowed_extensions = {".pdf", ".png", ".jpg", ".jpeg"}
@@ -320,11 +384,28 @@ async def scan_suplidores(file: UploadFile = File(...)):
         )
 
     file_content = await file.read()
-    print(f"[INFO] [/scan-suplidores] Received '{file.filename}' ({len(file_content)} bytes)")
+    level = resolve_thinking_level(thinking_level, model)
+    model_id = resolve_inference_model(
+        model, default=SUPLIDOR_MODEL, thinking_level=level,
+    )
+    spend_ctx = {
+        "thinking_level": level,
+        "user_id": (user_id or "").strip() or None,
+        "organization_id": (organization_id or "").strip() or None,
+        "client_id": (client_id or "").strip() or None,
+    }
+    print(
+        f"[INFO] [/scan-suplidores] Received '{file.filename}' "
+        f"({len(file_content)} bytes, model={model_id}, level={level})"
+    )
 
     async with gemini_semaphore:
         result = await asyncio.to_thread(
-            extract_suplidores_from_file, file_content, file.filename
+            extract_suplidores_from_file,
+            file_content,
+            file.filename,
+            model_id,
+            spend_ctx,
         )
 
     return result

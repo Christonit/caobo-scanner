@@ -113,6 +113,8 @@ interface MemberRow {
   email: string | null;
   createdAt: string;
   activated: boolean;
+  inviteSentAt: string | null;
+  inviteExpired: boolean;
   disabled: boolean;
 }
 
@@ -266,6 +268,58 @@ async function resetMemberPassword(member: MemberRow) {
   } finally {
     resettingId.value = null;
   }
+}
+
+// --- Reenviar invitación -------------------------------------------------------
+const resendingId = ref<string | null>(null);
+const resendError = ref<string | null>(null);
+const resendSuccessId = ref<string | null>(null);
+
+async function resendMemberInvite(member: MemberRow) {
+  if (member.activated) return;
+  if (
+    !window.confirm(
+      `¿Reenviar la invitación a "${member.fullName ?? member.email}"?`
+    )
+  )
+    return;
+
+  resendingId.value = member.id;
+  resendError.value = null;
+  resendSuccessId.value = null;
+  try {
+    await $fetch("/api/team/members/resend-invite", {
+      method: "POST",
+      body: {
+        userId: member.id,
+        organizationId: activeOrg.value?.id,
+      },
+    });
+    resendSuccessId.value = member.id;
+    await loadMembers();
+    setTimeout(() => {
+      if (resendSuccessId.value === member.id) resendSuccessId.value = null;
+    }, 3000);
+  } catch (err: any) {
+    resendError.value =
+      err?.data?.statusMessage ||
+      err?.message ||
+      "No se pudo reenviar la invitación.";
+  } finally {
+    resendingId.value = null;
+  }
+}
+
+function inviteStatusLabel(member: MemberRow) {
+  if (member.activated) return "Activo";
+  if (member.inviteExpired) return "Invitación expirada";
+  return "Invitación pendiente";
+}
+
+function inviteStatusClass(member: MemberRow) {
+  if (member.activated) return "bg-blue-50 text-blue-600";
+  if (member.inviteExpired) return "bg-red-50 text-red-600";
+  return "bg-amber-50 text-amber-600";
 }
 
 // --- Modelos de IA (solo lectura) ----------------------------------------------
@@ -540,13 +594,9 @@ const {
                 </span>
                 <span
                   class="flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
-                  :class="
-                    m.activated
-                      ? 'bg-blue-50 text-blue-600'
-                      : 'bg-amber-50 text-amber-600'
-                  "
+                  :class="inviteStatusClass(m)"
                 >
-                  {{ m.activated ? "Activo" : "Invitación pendiente" }}
+                  {{ inviteStatusLabel(m) }}
                 </span>
                 <span
                   v-if="m.disabled"
@@ -557,6 +607,9 @@ const {
               </div>
               <p class="mt-0.5 truncate text-xs text-gray-400">
                 {{ m.email }} · Se unió {{ new Date(m.createdAt).toLocaleDateString() }}
+                <span v-if="!m.activated && m.inviteSentAt">
+                  · Enviada {{ new Date(m.inviteSentAt).toLocaleString() }}
+                </span>
               </p>
               <p
                 v-if="resetError && resettingId !== m.id"
@@ -568,6 +621,15 @@ const {
                 Correo de restablecimiento enviado.
               </p>
               <p
+                v-if="resendError && resendingId !== m.id"
+                class="mt-1 text-xs text-red-600"
+              >
+                {{ resendError }}
+              </p>
+              <p v-if="resendSuccessId === m.id" class="mt-1 text-xs text-emerald-600">
+                Invitación reenviada.
+              </p>
+              <p
                 v-if="toggleError && togglingId !== m.id"
                 class="mt-1 text-xs text-red-600"
               >
@@ -577,6 +639,21 @@ const {
 
             <div class="flex flex-shrink-0 items-center gap-2">
               <button
+                v-if="!m.activated"
+                type="button"
+                :disabled="resendingId === m.id"
+                class="rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:opacity-50"
+                :class="
+                  m.inviteExpired
+                    ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                "
+                @click="resendMemberInvite(m)"
+              >
+                {{ resendingId === m.id ? "Reenviando…" : "Reenviar invitación" }}
+              </button>
+              <button
+                v-if="m.activated"
                 type="button"
                 :disabled="resettingId === m.id"
                 class="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50 disabled:opacity-50"

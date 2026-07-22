@@ -18,27 +18,7 @@
             PDF, PNG y JPG.
           </p>
         </div>
-        <a
-          href="https://github.com"
-          target="_blank"
-          rel="noopener"
-          class="hidden flex-shrink-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 sm:flex"
-        >
-          <svg
-            class="h-4 w-4 text-gray-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-          Saber más
-        </a>
+        <ThinkingLevelSelect />
       </header>
 
       <!-- Client + ERP catalog selection (mandatory before scanning) -->
@@ -2212,6 +2192,8 @@ import {
 import { onBeforeRouteLeave } from "vue-router";
 
 const API_BASE = useApiBase();
+const { model: thinkingModel } = useThinkingLevel();
+const { appendSpendAttribution } = useSpendAttribution();
 
 // --- Client + ERP catalog selection (mandatory before scanning) ----------
 const { list: listClients } = useClients();
@@ -2220,6 +2202,26 @@ const { listByClient: listBusinessRulesByClient } = useClientBusinessRules();
 const { upsertFromScan, listByClient: listSuplidoresByClient } =
   useClientSuplidores();
 const { getByClient: getClientTaxColumnMapping } = useClientTaxColumnMapping();
+const { log: logActivity } = useActivityLog();
+
+// Extraction workflow id — groups analyze / defer / export / rescan events.
+// A new session starts on page load (clean), on discard/clear, and when
+// starting a fresh extraction run (no prior results in the queue).
+const extractionSessionId = ref("");
+function beginExtractionSession() {
+  extractionSessionId.value = createActivitySessionId();
+  return extractionSessionId.value;
+}
+function withSession(metadata = {}) {
+  return {
+    ...metadata,
+    session_id: extractionSessionId.value || beginExtractionSession(),
+  };
+}
+
+// Name of the client currently selected, for activity log labels.
+const selectedClientName = () =>
+  clients.value.find((c) => c.id === selectedClientId.value)?.name ?? null;
 
 const clients = ref([]);
 const clientsLoading = ref(false);
@@ -3387,6 +3389,11 @@ const deferFileForLater = (file) => {
   const next = new Set(selectedFileIds.value);
   next.delete(file.id);
   selectedFileIds.value = next;
+  logActivity("rows_deferred", {
+    clientId: selectedClientId.value || null,
+    targetLabel: selectedClientName(),
+    metadata: withSession({ count: 1 }),
+  });
 };
 
 const restoreFileFromLater = (file) => {
@@ -3398,12 +3405,23 @@ const restoreFileFromLater = (file) => {
 
 const deferSelectedForLater = () => {
   const ids = selectedFileIds.value;
+  let moved = 0;
   files.value.forEach((f) => {
-    if (ids.has(f.id)) f.reviewLater = true;
+    if (ids.has(f.id)) {
+      f.reviewLater = true;
+      moved += 1;
+    }
   });
   clearSelection();
   if (reviewLaterFiles.value.length) {
     tableView.value = "review_later";
+  }
+  if (moved > 0) {
+    logActivity("rows_deferred", {
+      clientId: selectedClientId.value || null,
+      targetLabel: selectedClientName(),
+      metadata: withSession({ count: moved }),
+    });
   }
 };
 
@@ -3433,6 +3451,8 @@ const formatBytes = (bytes) => {
 };
 
 onMounted(() => {
+  // Fresh extraction page → new workflow session.
+  beginExtractionSession();
   loadClients();
   restoreClientSelection();
   loadStripNcfSettings();
@@ -3957,6 +3977,8 @@ const runSingleFileEvaluation = async (fileItem) => {
         JSON.stringify(clientTaxColumnMapping.value),
       );
     }
+    formData.append("model", thinkingModel.value);
+    appendSpendAttribution(formData, { clientId: selectedClientId.value });
 
     const response = await fetch(`${API_BASE}/upload`, {
       method: "POST",
@@ -4150,13 +4172,26 @@ const processAll = async () => {
     alert("Selecciona un cliente y sus documentos de ERP antes de procesar.");
     return;
   }
-  processing.value = true;
-  totalProcessingTime.value = 0;
-  const overallStartTime = performance.now();
 
   const pendingFiles = files.value.filter(
     (f) => f.status === "pending" && !f.reviewLater,
   );
+  // Fresh extraction (nothing analyzed yet) starts a new session; rescans /
+  // re-process keep the current one so attempts group together.
+  const hasPriorResults = files.value.some(
+    (f) =>
+      (f.status === "done" || f.status === "duplicate") && !pendingFiles.includes(f),
+  );
+  if (!extractionSessionId.value || !hasPriorResults) {
+    beginExtractionSession();
+  }
+  // Anything already analyzed before this run makes it a re-analysis / rescan.
+  const wasRescan = hasPriorResults;
+
+  processing.value = true;
+  totalProcessingTime.value = 0;
+  const overallStartTime = performance.now();
+
   const BATCH_SIZE = 25;
   let stoppedForCooldown = false;
 
@@ -4241,6 +4276,8 @@ const processAll = async () => {
           JSON.stringify(clientTaxColumnMapping.value),
         );
       }
+      formData.append("model", thinkingModel.value);
+      appendSpendAttribution(formData, { clientId: selectedClientId.value });
 
       const response = await fetch(`${API_BASE}/upload-batch`, {
         method: "POST",
@@ -4324,6 +4361,24 @@ const processAll = async () => {
   totalProcessingTime.value = overallEndTime - overallStartTime;
   processing.value = false;
 
+  // Log a successful analysis run. Count only pages that produced usable data
+  // in this run (the meaningful "processed" count), not everything queued.
+  const analyzedPages = pendingFiles.filter(
+    (f) => f.status === "done" || f.status === "duplicate",
+  ).length;
+  if (analyzedPages > 0) {
+    logActivity("gastos_analyzed", {
+      clientId: selectedClientId.value || null,
+      targetLabel: selectedClientName(),
+      metadata: withSession({
+        pages: analyzedPages,
+        sent: pendingFiles.length,
+        is_rescan: wasRescan,
+        duration_ms: Math.round(totalProcessingTime.value),
+      }),
+    });
+  }
+
   if (stoppedForCooldown) {
     console.info(
       `Process All stopped early: batch rate limit reached. ` +
@@ -4399,6 +4454,9 @@ async function saveSuplidoresAndDownload() {
     suplidorSaving.value = true;
     suplidorSaveError.value = null;
     try {
+      const before = await listSuplidoresByClient(selectedClientId.value).catch(
+        () => [],
+      );
       await upsertFromScan(
         selectedClientId.value,
         suplidorSummaryRows.value.map((s) => ({
@@ -4407,6 +4465,20 @@ async function saveSuplidoresAndDownload() {
           tipo_de_factura: s.tipo_de_factura || null,
         })),
       );
+      const after = await listSuplidoresByClient(selectedClientId.value).catch(
+        () => before,
+      );
+      const storedCount = Math.max(0, after.length - before.length);
+      if (storedCount > 0) {
+        logActivity("suplidores_stored", {
+          clientId: selectedClientId.value || null,
+          targetLabel: selectedClientName(),
+          metadata: withSession({
+            count: storedCount,
+            source: "gastos_export",
+          }),
+        });
+      }
     } catch (e) {
       suplidorSaveError.value = e?.message || "Error guardando suplidores.";
     } finally {
@@ -4499,6 +4571,14 @@ const downloadExcel = async () => {
     a.click();
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
+
+    // Count the pages actually written to the export — not everything scanned,
+    // since rows may have been excluded or deferred for later.
+    logActivity("gastos_exported", {
+      clientId: selectedClientId.value || null,
+      targetLabel: selectedClientName(),
+      metadata: withSession({ pages: filesData.length }),
+    });
   } catch (error) {
     console.error("Error downloading file:", error);
     alert("Error al descargar el archivo Excel");
@@ -4516,6 +4596,8 @@ const clearFiles = () => {
   if (fileInput.value) {
     fileInput.value.value = "";
   }
+  // Discard everything → new extraction session for the next run.
+  beginExtractionSession();
 };
 </script>
 

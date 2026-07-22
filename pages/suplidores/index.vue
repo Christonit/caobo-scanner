@@ -4,10 +4,26 @@ import type { ClientSuplidor } from "~/composables/useClientSuplidores";
 import { TIPO_DE_FACTURA_OPTIONS } from "~/composables/useClientSuplidores";
 
 const API_BASE = useApiBase();
+const { model: thinkingModel } = useThinkingLevel();
+const { appendSpendAttribution } = useSpendAttribution();
 
 // ── Clients ───────────────────────────────────────────────────────────────────
 const { list: listClients } = useClients();
 const { listByClient, upsertFromScan } = useClientSuplidores();
+const { log: logActivity } = useActivityLog();
+
+// Extraction workflow id for this page (analyze / store / export).
+const extractionSessionId = ref("");
+function beginExtractionSession() {
+  extractionSessionId.value = createActivitySessionId();
+  return extractionSessionId.value;
+}
+function withSession(metadata: Record<string, unknown> = {}) {
+  return {
+    ...metadata,
+    session_id: extractionSessionId.value || beginExtractionSession(),
+  };
+}
 
 const clients = ref<Client[]>([]);
 const selectedClientId = ref<string | null>(null);
@@ -36,6 +52,8 @@ async function loadDbSuplidores() {
 watch(selectedClientId, () => {
   fileRows.value = [];
   extractedSuplidores.value = [];
+  scanYieldedEmpty.value = false;
+  beginExtractionSession();
   loadDbSuplidores();
 });
 
@@ -84,6 +102,8 @@ const fileRows = ref<FileRow[]>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
 const scanning = ref(false);
 const scanError = ref<string | null>(null);
+/** True after a completed analysis that returned no suplidores. */
+const scanYieldedEmpty = ref(false);
 
 // extracted suplidores accumulated across all analyzed files
 interface ExtractedSuplidor {
@@ -230,6 +250,14 @@ function removeRow(id: string) {
   fileRows.value = fileRows.value.filter((r) => r.id !== id);
 }
 
+function clearExtractionQueue() {
+  fileRows.value = [];
+  extractedSuplidores.value = [];
+  scanYieldedEmpty.value = false;
+  // Discard everything → new extraction session for the next run.
+  beginExtractionSession();
+}
+
 // ── Preview modal ─────────────────────────────────────────────────────────────
 const previewUrl = ref<string | null>(null);
 const previewName = ref("");
@@ -257,7 +285,15 @@ async function analyzeWithAI() {
   if (!pending.length) return;
 
   scanError.value = null;
+  scanYieldedEmpty.value = false;
   scanning.value = true;
+
+  const extractedBefore = extractedSuplidores.value.length;
+  // Fresh extraction (no prior done files) starts a new session; re-runs keep it.
+  const hasPriorResults = fileRows.value.some((r) => r.status === "done");
+  if (!extractionSessionId.value || !hasPriorResults) {
+    beginExtractionSession();
+  }
 
   // Match against saved suplidores: in DB vs already registered in Citrus
   const knownDocs = new Set(
@@ -286,6 +322,8 @@ async function analyzeWithAI() {
     try {
       const fd = new FormData();
       fd.append("file", row.file);
+      fd.append("model", thinkingModel.value);
+      appendSpendAttribution(fd, { clientId: selectedClientId.value });
       const res = await fetch(`${API_BASE}/scan-suplidores`, {
         method: "POST",
         body: fd,
@@ -336,6 +374,28 @@ async function analyzeWithAI() {
   }
 
   scanning.value = false;
+
+  // Log the successful analysis run: pages actually analyzed + suplidores found.
+  const analyzedRows = pending.filter((r) => r.status === "done");
+  const analyzedPages = analyzedRows.reduce(
+    (sum, r) => sum + (r.pageCount ?? 1),
+    0,
+  );
+  const extractedDelta = extractedSuplidores.value.length - extractedBefore;
+  if (analyzedRows.length > 0 && extractedDelta === 0) {
+    scanYieldedEmpty.value = true;
+  }
+  if (analyzedRows.length > 0) {
+    logActivity("suplidores_analyzed", {
+      clientId: selectedClientId.value,
+      targetLabel: selectedClient.value?.name ?? null,
+      metadata: withSession({
+        files: analyzedRows.length,
+        pages: analyzedPages,
+        extracted: extractedDelta,
+      }),
+    });
+  }
 }
 
 // ── Save ──────────────────────────────────────────────────────────────────────
@@ -365,6 +425,14 @@ async function saveToDatabase() {
     const savedIds = new Set(toSave.map((s) => s._id));
     extractedSuplidores.value.forEach((s) => {
       if (savedIds.has(s._id)) s.isNew = false;
+    });
+    logActivity("suplidores_stored", {
+      clientId: selectedClientId.value,
+      targetLabel: selectedClient.value?.name ?? null,
+      metadata: withSession({
+        count: toSave.length,
+        source: "suplidores_page",
+      }),
     });
     saveSuccess.value = true;
     setTimeout(() => (saveSuccess.value = false), 3000);
@@ -424,6 +492,12 @@ async function downloadTemplate() {
   a.click();
   URL.revokeObjectURL(url);
   document.body.removeChild(a);
+
+  logActivity("suplidores_exported", {
+    clientId: selectedClientId.value,
+    targetLabel: selectedClient.value?.name ?? null,
+    metadata: withSession({ count: toDownload.length }),
+  });
 }
 
 // ── DB table: toggle registered ───────────────────────────────────────────────
@@ -471,6 +545,7 @@ const registeredDbCount = computed(
 );
 
 onMounted(async () => {
+  beginExtractionSession();
   clients.value = await listClients();
 });
 </script>
@@ -480,12 +555,15 @@ onMounted(async () => {
     <div class="mx-auto max-w-5xl">
 
       <!-- Header -->
-      <header class="mb-8">
-        <h1 class="text-2xl font-bold tracking-tight text-gray-900">Suplidores</h1>
-        <p class="mt-1 text-sm text-gray-500">
-          Extrae suplidores de recibos con IA y gestiona cuáles están
-          registrados en la plataforma de Carga Masiva.
-        </p>
+      <header class="mb-8 flex items-start justify-between gap-4">
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight text-gray-900">Suplidores</h1>
+          <p class="mt-1 text-sm text-gray-500">
+            Extrae suplidores de recibos con IA y gestiona cuáles están
+            registrados en la plataforma de Carga Masiva.
+          </p>
+        </div>
+        <ThinkingLevelSelect />
       </header>
 
       <!-- Client selector -->
@@ -538,7 +616,7 @@ onMounted(async () => {
                 type="button"
                 class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-500 transition hover:bg-gray-100 disabled:opacity-50"
                 :disabled="scanning"
-                @click="fileRows = []; extractedSuplidores = []"
+                @click="clearExtractionQueue"
               >Limpiar</button>
 
               <button
@@ -719,6 +797,19 @@ onMounted(async () => {
             <p class="mt-1 text-xs text-gray-400">PDF, PNG, JPG · múltiples archivos</p>
           </div>
         </section>
+
+        <!-- Empty analysis result -->
+        <div
+          v-if="scanYieldedEmpty && extractedSuplidores.length === 0"
+          class="mb-10 rounded-xl border border-amber-200 bg-amber-50 px-6 py-8 text-center"
+        >
+          <p class="text-sm font-medium text-amber-900">
+            El análisis no arrojó resultados.
+          </p>
+          <p class="mt-1 text-sm text-amber-700">
+            No se encontraron suplidores en los recibos analizados. Prueba con otro archivo o un nivel de pensamiento más profundo.
+          </p>
+        </div>
 
         <!-- ═══════════════════════════════════════════════════
              SECTION 2 — Extracted suplidores results

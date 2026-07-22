@@ -1,8 +1,8 @@
 import { readBody } from "h3";
 
-// Sends a "reset your password" email to a member on an admin's behalf.
-// The member sets their own new password via the same /auth/callback flow
-// used for invites — the admin never sees or sets the password directly.
+// Re-sends the Supabase invite email for a pending (unconfirmed) member.
+// GoTrue's admin invite endpoint regenerates the token and emails again when
+// the user already exists but has not confirmed yet.
 export default defineEventHandler(async (event) => {
   const body = await readBody<{
     userId?: string;
@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
 
   const { data: targetProfile, error: profileError } = await admin
     .from("user_profiles")
-    .select("id, organization_id")
+    .select("id, organization_id, full_name")
     .eq("id", userId)
     .maybeSingle();
 
@@ -40,16 +40,32 @@ export default defineEventHandler(async (event) => {
     });
   }
 
+  if (authUser.user.email_confirmed_at) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Este miembro ya activó su cuenta.",
+    });
+  }
+
   const siteUrl = getSiteUrl(event);
-  const { error: resetError } = await admin.auth.resetPasswordForEmail(
+  const fullName =
+    targetProfile.full_name ||
+    (authUser.user.user_metadata?.full_name as string | undefined) ||
+    null;
+
+  const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(
     authUser.user.email,
-    // Point directly at the set-password page so the PKCE code is exchanged
-    // there, keeping the PASSWORD_RECOVERY session alive when updateUser runs.
-    { redirectTo: `${siteUrl}/auth/reset-password` }
+    {
+      data: fullName ? { full_name: fullName } : undefined,
+      redirectTo: `${siteUrl}/auth/callback`,
+    }
   );
 
-  if (resetError) {
-    throw createError({ statusCode: 500, statusMessage: resetError.message });
+  if (inviteError) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: inviteError.message || "No se pudo reenviar la invitación.",
+    });
   }
 
   return { ok: true, email: authUser.user.email };

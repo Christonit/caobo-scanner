@@ -1,4 +1,4 @@
-import { getRequestURL, readBody } from "h3";
+import { readBody } from "h3";
 
 // Invites a user by email into the caller's organization (or, for a
 // superadmin, whichever organization they've selected).
@@ -24,7 +24,7 @@ export default defineEventHandler(async (event) => {
 
   const admin = useSupabaseAdmin(event);
   const caller = await authorizeTeamCaller(event, admin, body?.organizationId);
-  const siteUrl = getRequestURL(event).origin;
+  const siteUrl = getSiteUrl(event);
 
   // Look up an existing auth user first so we can add multi-org memberships
   // without sending a duplicate invite.

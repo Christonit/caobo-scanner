@@ -10,6 +10,31 @@ export type TemplateField = {
   description: string;
 };
 
+// Allowed values for public.activity_events.action (kept in sync with the
+// CHECK constraint in the activity_events migration).
+export type ActivityAction =
+  | "client_created"
+  | "client_updated"
+  | "document_added"
+  | "document_updated"
+  | "document_removed"
+  | "annotation_added"
+  | "annotation_updated"
+  | "annotation_removed"
+  | "suplidor_added"
+  | "suplidor_updated"
+  | "suplidor_removed"
+  | "gastos_analyzed"
+  | "gastos_exported"
+  | "suplidores_analyzed"
+  | "suplidores_stored"
+  | "suplidores_exported"
+  | "rows_deferred"
+  | "export_rated";
+
+// Matches public.api_token_usage.thinking_level and the UI selector.
+export type ThinkingLevel = "rapido" | "moderado" | "profundo";
+
 export type Database = {
   public: {
     Tables: {
@@ -263,6 +288,69 @@ export type Database = {
           tipo_de_factura?: string | null;
           registered_on_platform?: boolean;
           updated_at?: string;
+        };
+      };
+      activity_events: {
+        Row: {
+          id: string;
+          organization_id: string;
+          actor_id: string | null;
+          action: ActivityAction;
+          client_id: string | null;
+          target_label: string | null;
+          metadata: Record<string, unknown>;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          actor_id?: string | null;
+          action: ActivityAction;
+          client_id?: string | null;
+          target_label?: string | null;
+          metadata?: Record<string, unknown>;
+        };
+        Update: {
+          target_label?: string | null;
+          metadata?: Record<string, unknown>;
+        };
+      };
+      api_token_usage: {
+        Row: {
+          id: string;
+          organization_id: string;
+          actor_id: string | null;
+          client_id: string | null;
+          thinking_level: ThinkingLevel;
+          model: string;
+          source: string;
+          input_tokens: number;
+          output_tokens: number;
+          total_tokens: number;
+          input_cost_per_1m: number;
+          output_cost_per_1m: number;
+          cost_usd: number;
+          metadata: Record<string, unknown>;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          actor_id?: string | null;
+          client_id?: string | null;
+          thinking_level: ThinkingLevel;
+          model: string;
+          source: string;
+          input_tokens?: number;
+          output_tokens?: number;
+          total_tokens?: number;
+          input_cost_per_1m?: number;
+          output_cost_per_1m?: number;
+          cost_usd?: number;
+          metadata?: Record<string, unknown>;
+        };
+        Update: {
+          metadata?: Record<string, unknown>;
         };
       };
       templates: {

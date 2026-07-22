@@ -49,6 +49,11 @@ export default defineNuxtConfig({
     public: {
       // Overridable at runtime with NUXT_PUBLIC_API_BASE (see useApiBase()).
       apiBase: process.env.NUXT_PUBLIC_API_BASE || "http://localhost:8000",
+      // Public app origin for Auth email redirects (invite / reset password).
+      // Set NUXT_PUBLIC_SITE_URL on Railway to your deployed UI origin, e.g.
+      // https://caobo-automationz-ui-production.up.railway.app
+      // Without this, server-side invite links often embed localhost.
+      siteUrl: process.env.NUXT_PUBLIC_SITE_URL || "",
       // Feature flags. Defaults can be overridden per-environment via env
       // vars (NUXT_PUBLIC_FEATURES_AUTH=false, NUXT_PUBLIC_FEATURES_TEAM=false).
       // Consume via `useFeatureFlags()` (see composables/useFeatureFlags.ts).

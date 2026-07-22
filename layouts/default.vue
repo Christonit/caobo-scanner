@@ -71,11 +71,13 @@ const nav = [
     ],
   },
   { to: "/clientes", label: "Clientes", icon: "users" },
-  { to: "/#", label: "Plantillas", icon: "template" },
+  { to: "/activity", label: "Actividad", icon: "activity" },
 ];
 
 const navWithTeam = computed(() =>
-  isAdmin.value ? [...nav, { to: "/team", label: "Equipo", icon: "users" }] : nav,
+  isAdmin.value
+    ? [...nav, { to: "/team", label: "Equipo", icon: "users" }]
+    : nav,
 );
 
 function isNavActive(to: string, children?: { to: string }[]) {
@@ -151,8 +153,14 @@ const userInitials = computed(() =>
               v-if="canSwitchOrgs && orgMenuOpen"
               class="absolute left-4 right-4 top-full z-40 mt-1 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
             >
-              <p class="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                {{ isSuperAdmin ? "Ver como organización" : "Cambiar organización" }}
+              <p
+                class="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400"
+              >
+                {{
+                  isSuperAdmin
+                    ? "Ver como organización"
+                    : "Cambiar organización"
+                }}
               </p>
               <button
                 v-for="org in switchableOrgs"
@@ -169,7 +177,10 @@ const userInitials = computed(() =>
               >
                 <span class="truncate">{{ org.name }}</span>
               </button>
-              <p v-if="!switchableOrgs.length" class="px-3 py-2 text-sm text-gray-400">
+              <p
+                v-if="!switchableOrgs.length"
+                class="px-3 py-2 text-sm text-gray-400"
+              >
                 No hay organizaciones.
               </p>
             </div>
@@ -257,6 +268,21 @@ const userInitials = computed(() =>
                       stroke-linejoin="round"
                       stroke-width="1.8"
                       d="M17 20h5v-1a4 4 0 00-4-4h-1m-7 5H2v-1a4 4 0 014-4h4a4 4 0 014 4v1zm-3-9a3 3 0 11-6 0 3 3 0 016 0zm9-3a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                  </svg>
+                  <!-- activity -->
+                  <svg
+                    v-else-if="item.icon === 'activity'"
+                    class="h-5 w-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.8"
+                      d="M13 10V3L4 14h7v7l9-11h-7z"
                     />
                   </svg>
                   <!-- template -->

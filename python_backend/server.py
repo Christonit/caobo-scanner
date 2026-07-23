@@ -380,10 +380,12 @@ GASTOS_SYSTEM_PROMPT = """Tu eres un contador educado y radicado en Republica Do
 
     - campos_dudosos: Array de strings con los NOMBRES EXACTOS (usa las claves JSON, ej. "documento", "ncf", "ncf_afectado", "monto_en_bienes", "monto_en_servicios", "itbis", "fecha", "nombre") de CUALQUIER campo cuyo valor no puedas leer con 100% de certeza en la imagen. Si todos los campos son perfectamente legibles, devuelve un array vacio [].
 
+    - razones_campos_dudosos: Objeto (mapa) donde cada clave es un campo listado en "campos_dudosos" y el valor es un string corto (1-2 oraciones, en espanol) que explica QUE paso y POR QUE ese campo es dudoso. Ejemplo: {"ncf": "El 7mo digito parece 5 o 6 por borrosidad en la zona del NCF.", "documento": "El RNC esta parcialmente cortado en el borde de la foto."}. Si "campos_dudosos" esta vacio, devuelve {}. OBLIGATORIO: todo campo en "campos_dudosos" DEBE tener una entrada aqui con una razon concreta (no generica). Describe el problema visible (borrosidad, glare, digito ambiguo, corte, mancha, longitud inconsistente, etc.).
+
     **REGLA CRITICA SOBRE CALIDAD DE IMAGEN Y DIGITOS AMBIGUOS (aplica sobre todo a documento, ncf, ncf_afectado, y tambien a monto/itbis/fecha):**
     Los campos numericos/alfanumericos (RNC/cedula, NCF, NCF Afectado, montos) NO tienen contexto de idioma que permita "adivinar" un caracter borroso (a diferencia de una palabra, donde el contexto ayuda a inferir). Por lo tanto, si la foto tiene baja resolucion, esta borrosa, deteriorada, con glare/reflejo, doblada, manchada o cortada justo en la zona de un campo, DEBES tratar cualquier caracter que no se pueda distinguir con 100% de certeza como una duda real, AUNQUE tu "mejor adivinanza" parezca razonable y aunque el resto de la factura sea perfectamente legible.
     Presta especial atencion a pares de digitos que se confunden facilmente cuando la imagen esta degradada: 5 vs 6, 3 vs 8, 0 vs 8 vs 6, 1 vs 7, 2 vs 7, 4 vs 9, 9 vs 8.
-    - Reporta siempre tu lectura mas probable en el campo correspondiente (nombre, documento, ncf, etc.), PERO si tienes cualquier duda real sobre uno o mas de sus caracteres por causa de la calidad/deterioro de la imagen, DEBES incluir el nombre de ese campo en "campos_dudosos". Ejemplo: si en el NCF no puedes distinguir si un digito es "5" o "6" (ej. "...613256" vs "...613266"), agrega "ncf" a campos_dudosos.
+    - Reporta siempre tu lectura mas probable en el campo correspondiente (nombre, documento, ncf, etc.), PERO si tienes cualquier duda real sobre uno o mas de sus caracteres por causa de la calidad/deterioro de la imagen, DEBES incluir el nombre de ese campo en "campos_dudosos" Y una razon concreta en "razones_campos_dudosos". Ejemplo: si en el NCF no puedes distinguir si un digito es "5" o "6" (ej. "...613256" vs "...613266"), agrega "ncf" a campos_dudosos y {"ncf": "No se distingue si un digito del NCF es 5 o 6 por borrosidad."} en razones_campos_dudosos.
     - No agregues un campo a "campos_dudosos" solo por incertidumbre de negocio (ej. no saber a que categoria de gasto pertenece); es SOLO para cuando la imagen en si mismo impide leer el valor con certeza total.
 
     - score: Se calcula EN BASE a "campos_dudosos", no lo decidas de forma independiente:
@@ -406,7 +408,7 @@ GASTOS_SYSTEM_PROMPT = """Tu eres un contador educado y radicado en Republica Do
     5. ITBIS
     6. FECHA: Solo se toma la fecha de emision de la factura, se debe ignorar casos similares 'Valido hasta','NFC Vence', 'Fecha', 'Fecha limite pago'.
 
-    Retornar la informacion en formato JSON con las siguientes claves: nombre, documento, ncf, ncf_afectado, tipo_de_suplidor, tipo_de_gasto, descripcion, fecha, monto_en_servicios, monto_en_bienes, itbis, selectivo, descuento, propina, moneda, metodo_de_pago, campos_dudosos, score.
+    Retornar la informacion en formato JSON con las siguientes claves: nombre, documento, ncf, ncf_afectado, tipo_de_suplidor, tipo_de_gasto, descripcion, fecha, monto_en_servicios, monto_en_bienes, itbis, selectivo, descuento, propina, moneda, metodo_de_pago, campos_dudosos, razones_campos_dudosos, score.
     """
 
 
@@ -789,8 +791,8 @@ def _build_gastos_business_rules_prompt_block(business_rules: list[dict]) -> str
             lines.append(f"    - {label}")
 
     return (
-        "\n\nADICIONAL - Reglas de negocio de este cliente especifico "
-        "(contexto para ayudarte a tomar mejores decisiones al clasificar "
+        "\n\nADICIONAL - Reglas de negocio (organizacion y/o cliente; "
+        "contexto para ayudarte a tomar mejores decisiones al clasificar "
         "y extraer este documento; NO son valores fijos que debas copiar "
         "literalmente, solo guian tu criterio):\n"
         + "\n".join(lines)
@@ -852,9 +854,43 @@ CAMPOS_DUDOSOS_VALID_KEYS = {
     "moneda", "metodo_de_pago", "concepto_id",
 }
 
+# Fallback hover text when a field is flagged but the model omitted a reason.
+DEFAULT_DUDOSO_REASON = (
+    "Imagen poco clara: no se pudo leer este valor con certeza total."
+)
+
+# Reasons for server-side flags (not produced by the LLM).
+SERVER_DUDOSO_REASONS = {
+    "ncf": (
+        "El NCF no tiene la longitud esperada para su serie "
+        "(E31 = 13 caracteres, B0x = 11); validar dígito por dígito."
+    ),
+    "concepto_id": (
+        "No se encontró coincidencia en el catálogo de conceptos; "
+        "seleccionar manualmente."
+    ),
+}
+
+
+def _campo_dudoso_key(item) -> str:
+    """Extract a field key from a string or {campo/field/nombre: ...} object."""
+    if isinstance(item, dict):
+        raw = (
+            item.get("campo")
+            or item.get("field")
+            or item.get("nombre")
+            or item.get("key")
+            or ""
+        )
+        return str(raw or "").strip().lower()
+    return str(item or "").strip().lower()
+
 
 def _normalize_campos_dudosos(value) -> list[str]:
-    """Coerce the LLM's 'campos_dudosos' into a de-duplicated list of known field keys."""
+    """
+    Coerce the LLM's 'campos_dudosos' into a de-duplicated list of known field
+    keys. Accepts plain strings or objects like {"campo": "ncf", "razon": "..."}.
+    """
     if not value:
         return []
     if isinstance(value, str):
@@ -863,10 +899,66 @@ def _normalize_campos_dudosos(value) -> list[str]:
         return []
     seen: list[str] = []
     for item in value:
-        key = str(item or "").strip().lower()
+        key = _campo_dudoso_key(item)
         if key in CAMPOS_DUDOSOS_VALID_KEYS and key not in seen:
             seen.append(key)
     return seen
+
+
+def _normalize_razones_campos_dudosos(
+    value,
+    campos_dudosos: list[str],
+    *,
+    campos_dudosos_raw=None,
+) -> dict[str, str]:
+    """
+    Build {field: reason} for every flagged field.
+
+    Accepts:
+    - dict mapping field -> reason string
+    - list of {campo, razon} objects (also pulled from campos_dudosos_raw)
+    Ensures every key in campos_dudosos has a non-empty reason (fallback if missing).
+    """
+    reasons: dict[str, str] = {}
+
+    def _put(field: str, reason) -> None:
+        key = str(field or "").strip().lower()
+        text = str(reason or "").strip()
+        if key in CAMPOS_DUDOSOS_VALID_KEYS and text and key not in reasons:
+            reasons[key] = text
+
+    if isinstance(value, dict):
+        for field, reason in value.items():
+            _put(field, reason)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            if isinstance(item, dict):
+                _put(
+                    _campo_dudoso_key(item),
+                    item.get("razon")
+                    or item.get("reason")
+                    or item.get("motivo")
+                    or item.get("mensaje"),
+                )
+
+    # Also harvest reasons embedded in campos_dudosos as objects.
+    if isinstance(campos_dudosos_raw, (list, tuple)):
+        for item in campos_dudosos_raw:
+            if isinstance(item, dict):
+                _put(
+                    _campo_dudoso_key(item),
+                    item.get("razon")
+                    or item.get("reason")
+                    or item.get("motivo")
+                    or item.get("mensaje"),
+                )
+
+    for field in campos_dudosos:
+        if field not in reasons:
+            reasons[field] = DEFAULT_DUDOSO_REASON
+
+    # Drop reasons for fields that are not actually flagged.
+    return {k: reasons[k] for k in campos_dudosos if k in reasons}
 
 
 def _score_from_campos_dudosos(campos_dudosos: list[str]) -> int:
@@ -928,11 +1020,29 @@ def prepare_gastos_export_row(data: dict) -> dict:
             f"[WARNING] NCF {ncf} requires NCF Afectado (B03/B04) but none was provided"
         )
 
-    campos_dudosos = _normalize_campos_dudosos(data.get("campos_dudosos"))
+    campos_dudosos_raw = data.get("campos_dudosos")
+    campos_dudosos = _normalize_campos_dudosos(campos_dudosos_raw)
     # Merge server-side findings (e.g. over-length NCF) that the model missed.
     for field in server_dubious:
         if field not in campos_dudosos:
             campos_dudosos.append(field)
+
+    razones_campos_dudosos = _normalize_razones_campos_dudosos(
+        data.get("razones_campos_dudosos"),
+        campos_dudosos,
+        campos_dudosos_raw=campos_dudosos_raw,
+    )
+    # Prefer the server-authored reason when we ourselves flagged the field.
+    for field in server_dubious:
+        if field in SERVER_DUDOSO_REASONS:
+            razones_campos_dudosos[field] = SERVER_DUDOSO_REASONS[field]
+    # concepto_id is injected post-extraction (catalog miss); if still on the
+    # generic fallback, upgrade to the catalog-specific message.
+    if (
+        "concepto_id" in razones_campos_dudosos
+        and razones_campos_dudosos["concepto_id"] == DEFAULT_DUDOSO_REASON
+    ):
+        razones_campos_dudosos["concepto_id"] = SERVER_DUDOSO_REASONS["concepto_id"]
 
     reported_score = _to_int_or_none(data.get("score")) or 0
     if reported_score > 0:
@@ -970,6 +1080,7 @@ def prepare_gastos_export_row(data: dict) -> dict:
         "filename": data.get("filename", "") or "",
         "score": score,
         "campos_dudosos": campos_dudosos,
+        "razones_campos_dudosos": razones_campos_dudosos,
     }
 
 
@@ -1138,16 +1249,28 @@ def _normalize_gastos_extracted(
     # If no match was found, flag it so the score drops and the cell is
     # highlighted for manual review in the frontend.
     extra_dudosos = list(extracted.get("campos_dudosos") or [])
-    if concepto_catalog and concepto_id is None and "concepto_id" not in extra_dudosos:
+    # Preserve whatever shape the model returned; prepare_gastos_export_row
+    # normalizes dict / list-of-objects and upgrades concepto_id's fallback
+    # reason to the catalog-specific message.
+    extra_razones = extracted.get("razones_campos_dudosos")
+    if concepto_catalog and concepto_id is None and "concepto_id" not in {
+        _campo_dudoso_key(x) for x in extra_dudosos
+    }:
         print(
             f"[WARNING] '{filename}': concepto catalog present but no match found "
             f"for '{extracted.get('concepto', '')}'; flagging concepto_id as dubious."
         )
         extra_dudosos.append("concepto_id")
+        if isinstance(extra_razones, dict):
+            extra_razones = {
+                **extra_razones,
+                "concepto_id": SERVER_DUDOSO_REASONS["concepto_id"],
+            }
 
     prepared = prepare_gastos_export_row({
         **extracted,
         "campos_dudosos": extra_dudosos,
+        "razones_campos_dudosos": extra_razones,
         "concepto_id": concepto_id,
         "tipo_de_pago_id": tipo_de_pago_id,
         "filename": filename,
@@ -1555,7 +1678,8 @@ def process_gastos_batch_with_gemini(
     batch_keys = (
         "nombre, documento, ncf, ncf_afectado, tipo_de_suplidor, tipo_de_gasto, "
         "descripcion, fecha, monto_en_servicios, monto_en_bienes, itbis, "
-        "selectivo, descuento, propina, moneda, metodo_de_pago, campos_dudosos, score"
+        "selectivo, descuento, propina, moneda, metodo_de_pago, campos_dudosos, "
+        "razones_campos_dudosos, score"
     )
     if concepto_catalog:
         batch_keys += ", concepto"

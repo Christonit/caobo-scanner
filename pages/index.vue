@@ -1,9 +1,14 @@
 <template>
   <div
-    class="mx-auto flex w-full gap-8 px-8"
+    class="mx-auto flex w-full gap-8 px-8 transition-[padding] duration-200"
     :class="{
       'max-w-6xl': files.length == 0,
     }"
+    :style="
+      previewFile
+        ? { paddingRight: `calc(${previewWidth}px + 2rem)` }
+        : undefined
+    "
   >
     <!-- Main column -->
     <div class="min-w-0 flex-1">
@@ -21,7 +26,7 @@
         <ThinkingLevelSelect />
       </header>
 
-      <!-- Client + ERP catalog selection (mandatory before scanning) -->
+      <!-- Client selection (ERP catalogs are configured on the client page) -->
       <section
         v-if="!showFullTableColumns"
         class="mb-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
@@ -30,7 +35,7 @@
           <div>
             <h2 class="text-base font-semibold text-gray-900">Cliente</h2>
             <p class="mt-0.5 text-sm text-gray-500">
-              Selecciona el cliente y los documentos de ERP que se usarán para
+              Selecciona el cliente cuyos documentos de ERP se usarán para
               clasificar Concepto Id y Tipo de Pago Id.
             </p>
           </div>
@@ -44,7 +49,11 @@
             v-else
             class="flex-shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700"
           >
-            Selección requerida
+            {{
+              selectedClientId
+                ? "Configuración incompleta"
+                : "Selección requerida"
+            }}
           </span>
         </div>
 
@@ -55,155 +64,39 @@
           {{ clientsError }}
         </p>
 
-        <div class="grid gap-4 sm:grid-cols-3">
-          <div>
-            <label
-              for="client-select"
-              class="mb-1.5 block text-sm font-medium text-gray-700"
-            >
-              Cliente <span class="text-rose-500">*</span>
-            </label>
-            <select
-              id="client-select"
-              v-model="selectedClientId"
-              @change="onClientChange"
-              :disabled="clientsLoading"
-              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
-            >
-              <option value="">
-                {{ clientsLoading ? "Cargando…" : "Selecciona un cliente" }}
-              </option>
-              <option
-                v-for="client in clients"
-                :key="client.id"
-                :value="client.id"
-              >
-                {{ client.name }}
-              </option>
-            </select>
-            <p
-              v-if="!clientsLoading && clients.length === 0"
-              class="mt-1.5 text-xs text-gray-400"
-            >
-              No hay clientes.
-              <NuxtLink to="/clientes" class="text-emerald-700 hover:underline"
-                >Crea uno primero</NuxtLink
-              >.
-            </p>
-          </div>
-
-          <div>
-            <label
-              for="concepto-doc-select"
-              class="mb-1.5 block text-sm font-medium text-gray-700"
-            >
-              Documento para Concepto Id <span class="text-rose-500">*</span>
-            </label>
-            <select
-              id="concepto-doc-select"
-              v-model="selectedConceptoDocId"
-              :disabled="!selectedClientId || clientDocumentsLoading"
-              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
-            >
-              <option value="">
-                {{
-                  clientDocumentsLoading
-                    ? "Cargando…"
-                    : "Selecciona un documento"
-                }}
-              </option>
-              <option
-                v-for="doc in clientDocuments"
-                :key="doc.id"
-                :value="doc.id"
-              >
-                {{ doc.document_name }} ({{ doc.document_attributes.length }}
-                atributos)
-              </option>
-            </select>
-            <p
-              v-if="
-                selectedClientId &&
-                !clientDocumentsLoading &&
-                clientDocuments.length === 0
-              "
-              class="mt-1.5 text-xs text-gray-400"
-            >
-              Este cliente no tiene documentos.
-              <NuxtLink
-                :to="`/clientes/${selectedClientId}`"
-                class="text-emerald-700 hover:underline"
-                >Crea uno primero</NuxtLink
-              >.
-            </p>
-          </div>
-
-          <div>
-            <label
-              for="tipo-de-pago-doc-select"
-              class="mb-1.5 block text-sm font-medium text-gray-700"
-            >
-              Documento para Tipo de Pago Id
-              <span class="text-rose-500">*</span>
-            </label>
-            <select
-              id="tipo-de-pago-doc-select"
-              v-model="selectedTipoDePagoDocId"
-              :disabled="!selectedClientId || clientDocumentsLoading"
-              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
-            >
-              <option value="">
-                {{
-                  clientDocumentsLoading
-                    ? "Cargando…"
-                    : "Selecciona un documento"
-                }}
-              </option>
-              <option
-                v-for="doc in clientDocuments"
-                :key="doc.id"
-                :value="doc.id"
-              >
-                {{ doc.document_name }} ({{ doc.document_attributes.length }}
-                atributos)
-              </option>
-            </select>
-          </div>
-        </div>
-
-        <div class="mt-4 border-t border-gray-100 pt-4">
+        <div class="max-w-md">
           <label
-            for="tipo-de-gasto-context-doc-select"
+            for="client-select"
             class="mb-1.5 block text-sm font-medium text-gray-700"
           >
-            Documento de contexto para Tipo de Gasto
-            <span class="font-normal text-gray-400">(opcional)</span>
+            Cliente <span class="text-rose-500">*</span>
           </label>
           <select
-            id="tipo-de-gasto-context-doc-select"
-            v-model="selectedTipoDeGastoContextDocId"
-            :disabled="!selectedClientId || clientDocumentsLoading"
-            class="w-full max-w-md rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
+            id="client-select"
+            v-model="selectedClientId"
+            @change="onClientChange"
+            :disabled="clientsLoading"
+            class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
           >
             <option value="">
-              {{
-                clientDocumentsLoading ? "Cargando…" : "Sin contexto adicional"
-              }}
+              {{ clientsLoading ? "Cargando…" : "Selecciona un cliente" }}
             </option>
             <option
-              v-for="doc in clientDocuments"
-              :key="doc.id"
-              :value="doc.id"
+              v-for="client in clients"
+              :key="client.id"
+              :value="client.id"
             >
-              {{ doc.document_name }} ({{ doc.document_attributes.length }}
-              atributos)
+              {{ client.name }}
             </option>
           </select>
-          <p class="mt-1.5 text-xs text-gray-400">
-            El "Tipo de Gasto" siempre se elige entre las 11 opciones fijas de
-            la app. Si seleccionas un documento aquí, sus atributos y comentario
-            se envían a la IA solo como contexto para ayudarla a elegir mejor
-            entre esas 11 opciones para este cliente.
+          <p
+            v-if="!clientsLoading && clients.length === 0"
+            class="mt-1.5 text-xs text-gray-400"
+          >
+            No hay clientes.
+            <NuxtLink to="/clientes" class="text-emerald-700 hover:underline"
+              >Crea uno primero</NuxtLink
+            >.
           </p>
         </div>
 
@@ -224,8 +117,19 @@
               d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-          Selecciona un cliente y sus documentos de Concepto Id / Tipo de Pago
-          Id antes de subir o procesar archivos.
+          <span v-if="!selectedClientId">
+            Selecciona un cliente antes de subir o procesar archivos.
+          </span>
+          <span v-else>
+            Este cliente no tiene configurados los documentos de Concepto Id /
+            Tipo de Pago Id.
+            <NuxtLink
+              :to="`/clientes/${selectedClientId}?tab=ajustes`"
+              class="font-semibold underline hover:text-amber-900"
+              >Configúralos en la pestaña Ajustes</NuxtLink
+            >
+            antes de continuar.
+          </span>
         </p>
       </section>
 
@@ -545,7 +449,7 @@
                   class="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500"
                   :class="`
               ${col === '#' ? 'sticky left-10 z-[55] w-14 bg-gray-50' : ''}
-              ${col === 'Score' ? 'sticky left-36 z-[55] w-20 bg-gray-50' : ''}
+              ${col === 'Score' ? 'sticky left-48 z-[55] w-20 bg-gray-50' : ''}
               ${
                 col === 'Documento' && showFullTableColumns
                   ? 'sticky left-20 z-[55] bg-gray-50'
@@ -585,8 +489,10 @@
                 :class="{
                   'bg-amber-50': isEdited(file),
                   'bg-slate-100': isSelected(file.id),
+                  'ring-2 ring-inset ring-emerald-400/70':
+                    previewFile?.id === file.id,
                 }"
-                @click="onRowClick($event, file.id)"
+                @click="onRowClick($event, file)"
               >
                 <td
                   :class="`px-3 py-2.5 text-center sticky left-0 hover:bg-gray-50 z-[25] ${isSelected(file.id) ? 'bg-slate-100' : isEdited(file) ? 'bg-amber-50' : 'bg-white'}`"
@@ -605,7 +511,10 @@
                   <span class="text-sm text-gray-500">{{ index + 1 }}</span>
                 </td>
                 <!-- Documento -->
-                <td v-if="showFullTableColumns" class="px-2 py-2.5 w-32">
+                <td
+                  v-if="showFullTableColumns"
+                  class="px-2 py-2.5 w-32 sticky left-20 bg-white z-[25]"
+                >
                   <input
                     type="text"
                     inputmode="numeric"
@@ -620,18 +529,14 @@
                     :class="{
                       [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'documento'),
                     }"
-                    :title="
-                      isFieldDudoso(file, 'documento')
-                        ? 'Imagen poco clara - validar manualmente'
-                        : ''
-                    "
+                    :title="getDudosoReason(file, 'documento')"
                     placeholder="-"
                   />
                 </td>
 
                 <!-- Status -->
                 <td
-                  :class="`px-2 py-2.5 w-12 ${showFullTableColumns ? 'sticky left-24 z-[25] hover:bg-gray-50 ' + (isSelected(file.id) ? 'bg-slate-100' : isEdited(file) ? 'bg-amber-50' : 'bg-white') : ''}`"
+                  :class="`px-2 py-2.5 w-12 ${showFullTableColumns ? ' z-[25] hover:bg-gray-50 ' + (isSelected(file.id) ? 'bg-slate-100' : isEdited(file) ? 'bg-amber-50' : 'bg-white') : ''}`"
                 >
                   <span
                     v-if="file.reviewLater"
@@ -654,11 +559,15 @@
                   </span>
                 </td>
                 <!-- Score -->
-                <td v-if="showFullTableColumns" class="px-2 py-2.5 text-center">
+                <td
+                  v-if="showFullTableColumns"
+                  class="px-2 py-2.5 text-center sticky left-[188px] bg-white"
+                >
                   <span
                     v-if="file.score > 0"
                     class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold mx-auto"
                     :class="getScoreClasses(file.score)"
+                    :title="getScoreReasonSummary(file)"
                   >
                     {{ file.score }}
                   </span>
@@ -676,37 +585,38 @@
                     :class="{
                       [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'nombre'),
                     }"
-                    :title="
-                      isFieldDudoso(file, 'nombre')
-                        ? 'Imagen poco clara - validar manualmente'
-                        : ''
-                    "
+                    :title="getDudosoReason(file, 'nombre')"
                     placeholder="-"
                   />
                 </td>
 
                 <!-- NCF -->
                 <td v-if="showFullTableColumns" class="px-2 py-2.5">
-                  <input
-                    type="text"
-                    v-model="file.editableData.ncf"
-                    @focus="startEditing(file)"
-                    @blur="
-                      file.editableData.ncf = normalizeNcf(
-                        file.editableData.ncf,
-                      )
-                    "
-                    class="w-36 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                    :class="{
-                      [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'ncf'),
-                    }"
-                    :title="
-                      isFieldDudoso(file, 'ncf')
-                        ? 'Imagen poco clara - validar manualmente'
-                        : ''
-                    "
-                    placeholder="-"
-                  />
+                  <div class="flex items-center gap-1">
+                    <input
+                      type="text"
+                      v-model="file.editableData.ncf"
+                      @focus="startEditing(file)"
+                      @blur="
+                        file.editableData.ncf = normalizeNcf(
+                          file.editableData.ncf,
+                        )
+                      "
+                      class="w-32 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      :class="{
+                        [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'ncf'),
+                      }"
+                      :title="getDudosoReason(file, 'ncf')"
+                      placeholder="-"
+                    />
+
+                    <span
+                      class="bg-slate-100 rounded-full p-1 inline-block font-medium leading-none w-6 h-6 border-slate-200 border box-border text-xs text-slate-500"
+                      title="Total de caracteres del NCF"
+                    >
+                      {{ file.editableData.ncf.length }}
+                    </span>
+                  </div>
                 </td>
                 <!-- Tipo de Suplidor -->
                 <td v-if="showFullTableColumns" class="px-2 py-2.5">
@@ -720,6 +630,7 @@
                         'tipo_de_suplidor',
                       ),
                     }"
+                    :title="getDudosoReason(file, 'tipo_de_suplidor')"
                   >
                     <option value="">-</option>
                     <option
@@ -754,6 +665,7 @@
                         'tipo_de_gasto',
                       ),
                     }"
+                    :title="getDudosoReason(file, 'tipo_de_gasto')"
                   >
                     <option value="">-</option>
                     <option
@@ -788,9 +700,9 @@
                       ),
                     }"
                     :title="
-                      isFieldDudoso(file, 'descripcion')
-                        ? 'Imagen poco clara - validar manualmente'
-                        : file.editableData.descripcion || 'Editar descripción'
+                      getDudosoReason(file, 'descripcion') ||
+                      file.editableData.descripcion ||
+                      'Editar descripción'
                     "
                     @click="openDescripcionEditor(file)"
                   >
@@ -838,11 +750,7 @@
                     :class="{
                       [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'fecha'),
                     }"
-                    :title="
-                      isFieldDudoso(file, 'fecha')
-                        ? 'Imagen poco clara - validar manualmente'
-                        : ''
-                    "
+                    :title="getDudosoReason(file, 'fecha')"
                     placeholder="DD/MM/AAAA"
                   />
                 </td>
@@ -862,6 +770,7 @@
                           'monto_en_servicios',
                         ),
                       }"
+                      :title="getDudosoReason(file, 'monto_en_servicios')"
                       placeholder="0"
                     />
                   </div>
@@ -882,6 +791,7 @@
                           'monto_en_bienes',
                         ),
                       }"
+                      :title="getDudosoReason(file, 'monto_en_bienes')"
                       placeholder="0"
                     />
                   </div>
@@ -898,6 +808,7 @@
                       :class="{
                         [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'itbis'),
                       }"
+                      :title="getDudosoReason(file, 'itbis')"
                       placeholder="-"
                     />
                   </div>
@@ -917,6 +828,7 @@
                           'selectivo',
                         ),
                       }"
+                      :title="getDudosoReason(file, 'selectivo')"
                       placeholder="-"
                     />
                   </div>
@@ -936,6 +848,7 @@
                           'descuento',
                         ),
                       }"
+                      :title="getDudosoReason(file, 'descuento')"
                       placeholder="-"
                     />
                   </div>
@@ -952,6 +865,7 @@
                       :class="{
                         [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'propina'),
                       }"
+                      :title="getDudosoReason(file, 'propina')"
                       placeholder="-"
                     />
                   </div>
@@ -966,6 +880,7 @@
                     :class="{
                       [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'moneda'),
                     }"
+                    :title="getDudosoReason(file, 'moneda')"
                     placeholder="-"
                   />
                 </td>
@@ -982,6 +897,7 @@
                         'metodo_de_pago',
                       ),
                     }"
+                    :title="getDudosoReason(file, 'metodo_de_pago')"
                     placeholder="-"
                   />
                 </td>
@@ -996,6 +912,7 @@
                         ? 'bg-amber-100 border-amber-400 ring-1 ring-amber-400 focus:ring-amber-400'
                         : 'border-transparent bg-transparent focus:border-emerald-500 focus:ring-emerald-500/40',
                     ]"
+                    :title="getDudosoReason(file, 'concepto_id')"
                   >
                     <option :value="null">-</option>
                     <option
@@ -1074,11 +991,10 @@
                     }"
                     placeholder="-"
                     :title="
-                      isFieldDudoso(file, 'ncf_afectado')
-                        ? 'Imagen poco clara - validar manualmente'
-                        : requiresNcfAfectado(file.editableData.ncf)
-                          ? 'Obligatorio cuando NCF es B03 o B04'
-                          : ''
+                      getDudosoReason(file, 'ncf_afectado') ||
+                      (requiresNcfAfectado(file.editableData.ncf)
+                        ? 'Obligatorio cuando NCF es B03 o B04'
+                        : '')
                     "
                   />
                 </td>
@@ -1266,8 +1182,11 @@
       </section>
     </div>
 
-    <!-- Data sources side panel -->
-    <aside v-if="files.length > 0" class="hidden w-72 flex-shrink-0 lg:block">
+    <!-- Data sources side panel (hidden while image preview is pinned open) -->
+    <aside
+      v-if="files.length > 0 && !previewFile"
+      class="hidden w-72 flex-shrink-0 lg:block"
+    >
       <div
         class="sticky top-8 max-h-[calc(100vh-4rem)] space-y-4 overflow-y-auto pb-4"
       >
@@ -1426,157 +1345,6 @@
           >
             Descartar todos
           </button>
-        </div>
-
-        <!-- NCF strip options for Excel export -->
-        <div class="rounded-xl border border-gray-200 bg-white">
-          <div class="flex items-center gap-2 px-3 py-2.5">
-            <button
-              type="button"
-              class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-gray-50"
-              :aria-expanded="stripNcfCardOpen"
-              @click="stripNcfCardOpen = !stripNcfCardOpen"
-            >
-              <svg
-                class="h-4 w-4 flex-shrink-0 text-gray-400 transition-transform"
-                :class="{ 'rotate-180': stripNcfCardOpen }"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M19 9l-7 7-7-7"
-                />
-              </svg>
-              <div class="min-w-0">
-                <p class="text-sm font-medium text-gray-900">
-                  Remover nomenclaturas NCF
-                </p>
-                <p v-if="stripNcfCardOpen" class="mt-0.5 text-xs text-gray-400">
-                  Al exportar, quita del inicio del valor las series tipadas
-                  (ej. B01 → 00222157). Los ceros que queden se conservan.
-                </p>
-              </div>
-            </button>
-            <button
-              type="button"
-              role="switch"
-              :aria-checked="stripNcfEnabled"
-              class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-              :class="stripNcfEnabled ? 'bg-emerald-600' : 'bg-gray-200'"
-              @click.stop="stripNcfEnabled = !stripNcfEnabled"
-            >
-              <span
-                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"
-                :class="stripNcfEnabled ? 'translate-x-5' : 'translate-x-0'"
-              />
-            </button>
-          </div>
-
-          <div
-            v-if="stripNcfCardOpen && stripNcfEnabled"
-            class="space-y-3 border-t border-gray-100 px-4 py-3"
-          >
-            <div class="relative">
-              <label class="mb-1.5 block text-xs font-medium text-gray-500">
-                Columnas del Excel
-              </label>
-              <button
-                type="button"
-                class="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-left text-sm text-gray-700 transition hover:border-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-                @click="
-                  stripNcfColumnDropdownOpen = !stripNcfColumnDropdownOpen
-                "
-              >
-                <span
-                  v-if="stripNcfColumns.length"
-                  class="flex flex-wrap gap-1"
-                >
-                  <span
-                    v-for="key in stripNcfColumns"
-                    :key="key"
-                    class="inline-flex rounded-md bg-gray-100 px-1.5 py-0.5 text-xs font-semibold text-gray-700"
-                  >
-                    {{ stripNcfColumnLabel(key) }}
-                  </span>
-                </span>
-                <span v-else class="text-gray-400">Selecciona columnas…</span>
-                <svg
-                  class="h-4 w-4 flex-shrink-0 text-gray-400 transition"
-                  :class="{ 'rotate-180': stripNcfColumnDropdownOpen }"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </button>
-              <div
-                v-if="stripNcfColumnDropdownOpen"
-                class="absolute left-0 right-0 z-25 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-              >
-                <label
-                  v-for="col in STRIP_NCF_COLUMN_OPTIONS"
-                  :key="col.key"
-                  class="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  <input
-                    type="checkbox"
-                    class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                    :checked="stripNcfColumns.includes(col.key)"
-                    @change="toggleStripNcfColumn(col.key)"
-                  />
-                  <span>{{ col.label }}</span>
-                </label>
-              </div>
-            </div>
-
-            <div>
-              <label class="mb-1.5 block text-xs font-medium text-gray-500">
-                Nomenclaturas
-              </label>
-              <div
-                class="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 transition focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/40"
-                @click="stripNcfInput?.focus()"
-              >
-                <span
-                  v-for="prefix in stripNcfPrefixes"
-                  :key="prefix"
-                  class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-gray-700"
-                >
-                  {{ prefix }}
-                  <button
-                    type="button"
-                    class="rounded text-gray-400 hover:text-gray-700"
-                    :title="`Quitar ${prefix}`"
-                    @click.stop="removeStripNcfPrefix(prefix)"
-                  >
-                    ×
-                  </button>
-                </span>
-                <input
-                  ref="stripNcfInput"
-                  v-model="stripNcfDraft"
-                  type="text"
-                  class="min-w-[5rem] flex-1 border-0 bg-transparent px-1 py-0.5 font-mono text-xs text-gray-700 outline-none placeholder:font-sans placeholder:text-gray-400"
-                  placeholder="Ej: B01 y Enter"
-                  @keydown="onStripNcfDraftKeydown"
-                  @blur="commitStripNcfDraft"
-                />
-              </div>
-              <p class="mt-1 text-[11px] text-gray-400">
-                Escribe la serie (B01, E31…) y pulsa Enter o coma.
-              </p>
-            </div>
-          </div>
         </div>
 
         <!-- Include-only filter for Excel export -->
@@ -1817,11 +1585,11 @@
     </aside>
   </div>
 
-  <!-- Side Panel Preview -->
+  <!-- Side Panel Preview — sticky until close; replaces Data sources buttons -->
   <Transition name="slide">
     <aside
       v-if="previewFile"
-      class="fixed right-0 top-0 flex h-full flex-col border-l border-gray-200 bg-white shadow-2xl z-[100]"
+      class="fixed right-0 top-0 z-[100] flex h-full flex-col border-l border-gray-200 bg-white"
       :style="{ width: `${previewWidth}px` }"
     >
       <div
@@ -1839,14 +1607,36 @@
         ></div>
       </div>
       <div
-        class="flex items-center justify-between border-b border-gray-200 px-4 py-4"
+        class="flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-3"
       >
-        <h3 class="truncate text-base font-semibold text-gray-900">
-          {{ previewFile.name }}
-        </h3>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-1.5">
+            <svg
+              class="h-3.5 w-3.5 flex-shrink-0 text-emerald-600"
+              fill="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+            </svg>
+            <p
+              class="text-[11px] font-medium uppercase tracking-wide text-emerald-700"
+            >
+              Fijada
+            </p>
+          </div>
+          <h3
+            class="truncate text-sm font-semibold text-gray-900"
+            :title="previewFile.name"
+          >
+            {{ previewFile.name }}
+          </h3>
+        </div>
         <button
+          type="button"
           @click="closePreview"
-          class="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+          class="flex-shrink-0 rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+          title="Cerrar vista previa"
         >
           <svg
             class="h-5 w-5"
@@ -1864,23 +1654,182 @@
         </button>
       </div>
 
-      <div class="flex-1 overflow-auto p-4">
+      <!-- Zoom / pan toolbar (images only) -->
+      <div
+        v-if="isImageFile(previewFile)"
+        class="flex items-center gap-1 border-b border-gray-100 px-3 py-2"
+      >
+        <button
+          type="button"
+          class="rounded-lg p-2 transition-colors"
+          :class="
+            previewMagnifierActive
+              ? 'bg-emerald-100 text-emerald-700'
+              : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'
+          "
+          :title="
+            previewMagnifierActive
+              ? 'Desactivar lupa'
+              : 'Lupa: mueve el cursor sobre la imagen · rueda para zoom'
+          "
+          :aria-pressed="previewMagnifierActive"
+          @click="togglePreviewMagnifier"
+        >
+          <svg
+            class="h-4.5 w-4.5 h-[18px] w-[18px]"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"
+            />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M11 8v6M8 11h6"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 disabled:opacity-40"
+          title="Alejar"
+          :disabled="
+            previewMagnifierActive
+              ? magnifierZoom <= MAGNIFIER_ZOOM_MIN
+              : previewZoom <= PREVIEW_ZOOM_MIN
+          "
+          @click="
+            previewMagnifierActive
+              ? nudgeMagnifierZoom(-MAGNIFIER_ZOOM_STEP)
+              : nudgePreviewZoom(-PREVIEW_ZOOM_STEP)
+          "
+        >
+          <svg
+            class="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M20 12H4"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="min-w-[3.25rem] rounded-md px-1.5 py-1 text-center text-xs font-semibold tabular-nums text-gray-600 hover:bg-gray-100"
+          :title="
+            previewMagnifierActive
+              ? 'Restablecer zoom de lupa'
+              : 'Restablecer zoom'
+          "
+          @click="
+            previewMagnifierActive
+              ? resetMagnifierZoom()
+              : resetPreviewTransform()
+          "
+        >
+          {{
+            Math.round(
+              (previewMagnifierActive ? magnifierZoom : previewZoom) * 100,
+            )
+          }}%
+        </button>
+        <button
+          type="button"
+          class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 disabled:opacity-40"
+          title="Acercar"
+          :disabled="
+            previewMagnifierActive
+              ? magnifierZoom >= MAGNIFIER_ZOOM_MAX
+              : previewZoom >= PREVIEW_ZOOM_MAX
+          "
+          @click="
+            previewMagnifierActive
+              ? nudgeMagnifierZoom(MAGNIFIER_ZOOM_STEP)
+              : nudgePreviewZoom(PREVIEW_ZOOM_STEP)
+          "
+        >
+          <svg
+            class="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 4v16m8-8H4"
+            />
+          </svg>
+        </button>
+        <p class="ml-auto truncate text-[11px] text-gray-400">
+          Clic en una fila para cambiar imagen
+        </p>
+      </div>
+
+      <div class="flex min-h-0 flex-1 flex-col p-3">
         <div
           v-if="isImageFile(previewFile)"
-          class="overflow-hidden rounded-xl bg-gray-100"
+          ref="previewContainerRef"
+          class="relative min-h-0 flex-1 overflow-hidden rounded-xl bg-gray-100"
+          :class="
+            previewMagnifierActive
+              ? 'cursor-none'
+              : previewZoom !== 1
+                ? isPreviewPanning
+                  ? 'cursor-grabbing'
+                  : 'cursor-grab'
+                : 'cursor-default'
+          "
+          @wheel="onPreviewWheel"
+          @mousedown="onPreviewPanStart"
+          @mousemove="onPreviewMagnifierMove"
+          @mouseleave="onPreviewMagnifierLeave"
         >
           <img
+            ref="previewImageRef"
             :src="previewUrl"
             :alt="previewFile.name"
-            class="h-auto w-full object-contain"
+            class="pointer-events-none absolute left-1/2 top-1/2 max-h-full max-w-full select-none object-contain"
+            draggable="false"
+            :style="{
+              transform: `translate(calc(-50% + ${previewPanX}px), calc(-50% + ${previewPanY}px)) scale(${previewZoom})`,
+              transformOrigin: 'center center',
+            }"
             @load="onPreviewImageLoad"
             @error="onPreviewImageError"
           />
+          <!-- Circular loupe: magnified slice under the cursor -->
+          <div
+            v-if="previewMagnifierActive && magnifierVisible"
+            class="pointer-events-none absolute z-10 overflow-hidden rounded-full border-2 border-white/90 shadow-lg ring-1 ring-black/10"
+            :style="magnifierLensStyle"
+            aria-hidden="true"
+          >
+            <img
+              :src="previewUrl"
+              alt=""
+              class="absolute max-w-none select-none"
+              draggable="false"
+              :style="magnifierImageStyle"
+            />
+          </div>
         </div>
 
         <div
           v-else-if="isPdfFile(previewFile)"
-          class="flex h-full flex-col overflow-hidden rounded-xl bg-gray-100"
+          class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-gray-100"
         >
           <iframe
             :src="previewUrl"
@@ -2199,6 +2148,9 @@ const { appendSpendAttribution } = useSpendAttribution();
 const { list: listClients } = useClients();
 const { listByClient } = useClientDocuments();
 const { listByClient: listBusinessRulesByClient } = useClientBusinessRules();
+const { listByOrganization: listOrgBusinessRules } =
+  useOrganizationBusinessRules();
+const { activeOrg } = useOrganization();
 const { upsertFromScan, listByClient: listSuplidoresByClient } =
   useClientSuplidores();
 const { getByClient: getClientTaxColumnMapping } = useClientTaxColumnMapping();
@@ -2232,17 +2184,27 @@ const selectedConceptoDocId = ref("");
 const selectedTipoDePagoDocId = ref("");
 // Optional - a client document picked purely to give the AI context when
 // choosing among the FIXED tipo_de_gasto options (never adds new values).
+// Configured once on the client "Ajustes" tab.
 const selectedTipoDeGastoContextDocId = ref("");
 
 const clientDocuments = ref([]);
 const clientDocumentsLoading = ref(false);
 const clientDocumentsError = ref(null);
 
+const extractionDocLabel = (docId) => {
+  if (!docId) return "";
+  const doc = clientDocuments.value.find((d) => d.id === docId);
+  return doc?.document_name || "";
+};
+
 // Optional, client-level business rules (see "Anotaciones del Negocio" on
 // the client detail page) - free-form context sent to the AI on top of the
 // Concepto/Tipo de Pago catalogs, independent of which documents are
 // selected above.
 const clientBusinessRules = ref([]);
+
+// Org-wide Anotaciones del Negocio — apply to every client / inference call.
+const orgBusinessRules = ref([]);
 
 // Which "Impuesto N" (1-5) export column each amount (ITBIS/Selectivo/
 // Descuento/Propina) goes into for the selected client - see "Impuestos"
@@ -2328,17 +2290,37 @@ const tipoDeGastoDocumentComment = computed(
   () => tipoDeGastoContextDoc.value?.comment || "",
 );
 
-// Flatten every rule group's attributes into a single list for the prompt -
-// the AI doesn't need the grouping, just the combined context.
-const businessRulesPayload = computed(() =>
-  clientBusinessRules.value.flatMap((rule) =>
-    (rule.business_rule_attributes ?? []).map((a) => ({
-      rule_type: a.rule_type,
-      rule_value: a.rule_value || "",
-      description: a.description || "",
-    })),
-  ),
-);
+// Flatten org + client rule attributes into a single list for the prompt -
+// org rules first (general), then client-specific. The AI doesn't need the
+// grouping, just the combined context.
+const businessRulesPayload = computed(() => {
+  const flatten = (rules) =>
+    (rules ?? []).flatMap((rule) =>
+      (rule.business_rule_attributes ?? []).map((a) => ({
+        rule_type: a.rule_type,
+        rule_value: a.rule_value || "",
+        description: a.description || "",
+      })),
+    );
+  return [
+    ...flatten(orgBusinessRules.value),
+    ...flatten(clientBusinessRules.value),
+  ];
+});
+
+const loadOrgBusinessRules = async () => {
+  const orgId = activeOrg.value?.id;
+  if (!orgId) {
+    orgBusinessRules.value = [];
+    return;
+  }
+  try {
+    orgBusinessRules.value = await listOrgBusinessRules(orgId);
+  } catch (err) {
+    console.warn("[Org business rules] No se pudieron cargar:", err);
+    orgBusinessRules.value = [];
+  }
+};
 
 const loadClients = async () => {
   clientsLoading.value = true;
@@ -2350,17 +2332,21 @@ const loadClients = async () => {
   } finally {
     clientsLoading.value = false;
   }
+  // Restore after the list is available so extraction doc ids can be read
+  // from the client row.
+  restoreClientSelection();
 };
 
-// Fetch documents/business rules for the currently selected client.
-// `preferredSelection`, when provided (restoring from localStorage), tries
-// to re-apply previously chosen document ids once the fresh document list
-// is in - but only the ones that still exist for this client; anything
-// stale/missing is simply left at its default ("").
-const loadClientDocumentsAndRules = async (preferredSelection = null) => {
+// Fetch documents/business rules for the currently selected client, and
+// apply the extraction catalogs stored on the client record (configured
+// under Clientes → Ajustes). Stale ids that no longer exist are cleared.
+const loadClientDocumentsAndRules = async () => {
   clientDocuments.value = [];
   clientBusinessRules.value = [];
   clientTaxColumnMapping.value = {};
+  selectedConceptoDocId.value = "";
+  selectedTipoDePagoDocId.value = "";
+  selectedTipoDeGastoContextDocId.value = "";
   if (!selectedClientId.value) return;
 
   clientDocumentsLoading.value = true;
@@ -2374,18 +2360,26 @@ const loadClientDocumentsAndRules = async (preferredSelection = null) => {
     clientDocumentsLoading.value = false;
   }
 
-  if (preferredSelection) {
-    const availableIds = new Set(clientDocuments.value.map((d) => d.id));
-    if (availableIds.has(preferredSelection.conceptoDocId)) {
-      selectedConceptoDocId.value = preferredSelection.conceptoDocId;
-    }
-    if (availableIds.has(preferredSelection.tipoDePagoDocId)) {
-      selectedTipoDePagoDocId.value = preferredSelection.tipoDePagoDocId;
-    }
-    if (availableIds.has(preferredSelection.tipoDeGastoContextDocId)) {
-      selectedTipoDeGastoContextDocId.value =
-        preferredSelection.tipoDeGastoContextDocId;
-    }
+  const client = clients.value.find((c) => c.id === selectedClientId.value);
+  const availableIds = new Set(clientDocuments.value.map((d) => d.id));
+  if (
+    client?.concepto_document_id &&
+    availableIds.has(client.concepto_document_id)
+  ) {
+    selectedConceptoDocId.value = client.concepto_document_id;
+  }
+  if (
+    client?.tipo_de_pago_document_id &&
+    availableIds.has(client.tipo_de_pago_document_id)
+  ) {
+    selectedTipoDePagoDocId.value = client.tipo_de_pago_document_id;
+  }
+  if (
+    client?.tipo_de_gasto_context_document_id &&
+    availableIds.has(client.tipo_de_gasto_context_document_id)
+  ) {
+    selectedTipoDeGastoContextDocId.value =
+      client.tipo_de_gasto_context_document_id;
   }
 
   // Business rules are optional context - fail silently so a missing/empty
@@ -2411,17 +2405,12 @@ const loadClientDocumentsAndRules = async (preferredSelection = null) => {
 };
 
 const onClientChange = () => {
-  selectedConceptoDocId.value = "";
-  selectedTipoDePagoDocId.value = "";
-  selectedTipoDeGastoContextDocId.value = "";
   loadClientDocumentsAndRules();
 };
 
-// --- Client/document selection persistence (localStorage) -----------------
-// Remembers the last selected client + Concepto/Tipo de Pago/Tipo de Gasto
-// documents across reloads, purely as a convenience. If nothing was saved
-// (or storage is unavailable), everything simply keeps its default ("")
-// and the user picks a client as before - no client is ever assumed.
+// --- Client selection persistence (localStorage) --------------------------
+// Remembers the last selected client across reloads. Extraction document
+// catalogs live on the client record (Clientes → Ajustes), not here.
 const CLIENT_SELECTION_KEY = "rcp_client_selection";
 
 const loadStoredClientSelection = () => {
@@ -2443,9 +2432,6 @@ const persistClientSelection = () => {
       CLIENT_SELECTION_KEY,
       JSON.stringify({
         clientId: selectedClientId.value || "",
-        conceptoDocId: selectedConceptoDocId.value || "",
-        tipoDePagoDocId: selectedTipoDePagoDocId.value || "",
-        tipoDeGastoContextDocId: selectedTipoDeGastoContextDocId.value || "",
       }),
     );
   } catch {
@@ -2457,21 +2443,16 @@ const restoreClientSelection = () => {
   const stored = loadStoredClientSelection();
   if (!stored?.clientId) return; // Nothing saved - keep the default (empty) state.
   selectedClientId.value = stored.clientId;
-  loadClientDocumentsAndRules({
-    conceptoDocId: stored.conceptoDocId || "",
-    tipoDePagoDocId: stored.tipoDePagoDocId || "",
-    tipoDeGastoContextDocId: stored.tipoDeGastoContextDocId || "",
-  });
+  loadClientDocumentsAndRules();
 };
 
+watch(selectedClientId, persistClientSelection);
+
 watch(
-  [
-    selectedClientId,
-    selectedConceptoDocId,
-    selectedTipoDePagoDocId,
-    selectedTipoDeGastoContextDocId,
-  ],
-  persistClientSelection,
+  () => activeOrg.value?.id,
+  () => {
+    loadOrgBusinessRules();
+  },
 );
 
 // --- UI state -------------------------------------------------------------
@@ -3265,6 +3246,25 @@ const sourceDocuments = ref([]);
 const processing = ref(false);
 const previewFile = ref(null);
 const previewUrl = ref(null);
+const previewZoom = ref(1);
+const previewPanX = ref(0);
+const previewPanY = ref(0);
+const previewMagnifierActive = ref(true);
+const magnifierZoom = ref(2.5);
+const magnifierVisible = ref(false);
+const magnifierX = ref(0);
+const magnifierY = ref(0);
+const magnifierRelX = ref(0.5);
+const magnifierRelY = ref(0.5);
+const magnifierImgW = ref(0);
+const magnifierImgH = ref(0);
+const previewContainerRef = ref(null);
+const previewImageRef = ref(null);
+const isPreviewPanning = ref(false);
+let previewPanStartX = 0;
+let previewPanStartY = 0;
+let previewPanOriginX = 0;
+let previewPanOriginY = 0;
 const totalProcessingTime = ref(0);
 
 const showFullTableColumns = computed(
@@ -3361,8 +3361,10 @@ const toggleSelect = (id) => {
   selectedFileIds.value = next;
 };
 
-/** Select/deselect a row on click; ignore edits and action controls. */
-const onRowClick = (event, id) => {
+/** Select/deselect a row on click; ignore edits and action controls.
+ *  While validating (after analysis), pin the row's image on the right.
+ *  If the preview is already open, always switch to the clicked row. */
+const onRowClick = (event, file) => {
   const target = event.target;
   if (
     !(target instanceof Element) ||
@@ -3370,7 +3372,10 @@ const onRowClick = (event, id) => {
   ) {
     return;
   }
-  toggleSelect(id);
+  toggleSelect(file.id);
+  if (previewFile.value || hasPerformedAnalysis.value) {
+    openPreview(file);
+  }
 };
 
 const toggleSelectAllVisible = () => {
@@ -3453,8 +3458,8 @@ const formatBytes = (bytes) => {
 onMounted(() => {
   // Fresh extraction page → new workflow session.
   beginExtractionSession();
-  loadClients();
-  restoreClientSelection();
+  loadClients(); // also restores last client + extraction catalogs
+  loadOrgBusinessRules();
   loadStripNcfSettings();
   loadExportValueFilterSettings();
   individualLimit.refresh();
@@ -3487,6 +3492,7 @@ onBeforeUnmount(() => {
     window.removeEventListener("storage", onRateLimitStorage);
     window.removeEventListener("resize", onWindowResize);
     window.removeEventListener("mousemove", onPreviewResizeMove);
+    window.removeEventListener("mousemove", onPreviewPanMove);
     window.removeEventListener("beforeunload", onBeforeUnload);
   }
   closePreview();
@@ -3597,6 +3603,7 @@ const createFileItem = (file, sourceId = null) => {
     },
     score: 0,
     camposDudosos: [],
+    razonesCamposDudosos: {},
     processingTime: null,
   };
 };
@@ -3614,8 +3621,8 @@ const splittingPdfs = ref(0);
 // --- Resizable preview side panel ----------------------------------------
 const PREVIEW_WIDTH_KEY = "rcp_preview_panel_width";
 const PREVIEW_MIN_WIDTH = 320;
-const PREVIEW_MAX_WIDTH_FRACTION = 0.75; // never wider than 75% of viewport
-const PREVIEW_DEFAULT_WIDTH = 480;
+const PREVIEW_MAX_WIDTH_FRACTION = 0.35; // never wider than 35vw
+const PREVIEW_DEFAULT_WIDTH = 420;
 
 const previewWidth = ref(PREVIEW_DEFAULT_WIDTH);
 const isResizingPreview = ref(false);
@@ -3667,6 +3674,152 @@ const stopPreviewResize = () => {
 
 const onWindowResize = () => {
   previewWidth.value = clampPreviewWidth(previewWidth.value);
+};
+
+// --- Preview zoom / pan + circular loupe ---------------------------------
+const PREVIEW_ZOOM_MIN = 0.5;
+const PREVIEW_ZOOM_MAX = 5;
+const PREVIEW_ZOOM_STEP = 0.25;
+const MAGNIFIER_SIZE = 180;
+const MAGNIFIER_ZOOM_MIN = 1.5;
+const MAGNIFIER_ZOOM_MAX = 6;
+const MAGNIFIER_ZOOM_STEP = 0.25;
+const MAGNIFIER_ZOOM_DEFAULT = 2.5;
+
+const clampPreviewZoom = (z) =>
+  Math.min(PREVIEW_ZOOM_MAX, Math.max(PREVIEW_ZOOM_MIN, z));
+
+const clampMagnifierZoom = (z) =>
+  Math.min(MAGNIFIER_ZOOM_MAX, Math.max(MAGNIFIER_ZOOM_MIN, z));
+
+const resetPreviewTransform = () => {
+  previewZoom.value = 1;
+  previewPanX.value = 0;
+  previewPanY.value = 0;
+};
+
+const resetMagnifierZoom = () => {
+  magnifierZoom.value = MAGNIFIER_ZOOM_DEFAULT;
+};
+
+const nudgePreviewZoom = (delta) => {
+  previewZoom.value = clampPreviewZoom(
+    Math.round((previewZoom.value + delta) * 100) / 100,
+  );
+  if (previewZoom.value === 1) {
+    previewPanX.value = 0;
+    previewPanY.value = 0;
+  }
+};
+
+const nudgeMagnifierZoom = (delta) => {
+  magnifierZoom.value = clampMagnifierZoom(
+    Math.round((magnifierZoom.value + delta) * 100) / 100,
+  );
+};
+
+const togglePreviewMagnifier = () => {
+  previewMagnifierActive.value = !previewMagnifierActive.value;
+  if (!previewMagnifierActive.value) {
+    magnifierVisible.value = false;
+  }
+  onPreviewPanEnd();
+};
+
+const magnifierLensStyle = computed(() => ({
+  width: `${MAGNIFIER_SIZE}px`,
+  height: `${MAGNIFIER_SIZE}px`,
+  left: `${magnifierX.value - MAGNIFIER_SIZE / 2}px`,
+  top: `${magnifierY.value - MAGNIFIER_SIZE / 2}px`,
+}));
+
+const magnifierImageStyle = computed(() => {
+  const z = magnifierZoom.value;
+  const w = magnifierImgW.value * z;
+  const h = magnifierImgH.value * z;
+  return {
+    width: `${w}px`,
+    height: `${h}px`,
+    left: `${MAGNIFIER_SIZE / 2 - magnifierRelX.value * w}px`,
+    top: `${MAGNIFIER_SIZE / 2 - magnifierRelY.value * h}px`,
+  };
+});
+
+const onPreviewMagnifierMove = (event) => {
+  if (!previewMagnifierActive.value) return;
+  const container = previewContainerRef.value;
+  const img = previewImageRef.value;
+  if (!container || !img) return;
+
+  const containerRect = container.getBoundingClientRect();
+  const imgRect = img.getBoundingClientRect();
+
+  magnifierX.value = event.clientX - containerRect.left;
+  magnifierY.value = event.clientY - containerRect.top;
+
+  if (
+    imgRect.width <= 0 ||
+    imgRect.height <= 0 ||
+    event.clientX < imgRect.left ||
+    event.clientX > imgRect.right ||
+    event.clientY < imgRect.top ||
+    event.clientY > imgRect.bottom
+  ) {
+    magnifierVisible.value = false;
+    return;
+  }
+
+  magnifierVisible.value = true;
+  magnifierImgW.value = imgRect.width;
+  magnifierImgH.value = imgRect.height;
+  magnifierRelX.value = (event.clientX - imgRect.left) / imgRect.width;
+  magnifierRelY.value = (event.clientY - imgRect.top) / imgRect.height;
+};
+
+const onPreviewMagnifierLeave = () => {
+  magnifierVisible.value = false;
+};
+
+const onPreviewWheel = (event) => {
+  if (previewMagnifierActive.value) {
+    event.preventDefault();
+    const direction = event.deltaY > 0 ? -1 : 1;
+    nudgeMagnifierZoom(direction * MAGNIFIER_ZOOM_STEP);
+    onPreviewMagnifierMove(event);
+    return;
+  }
+  if (previewZoom.value === 1) return;
+  event.preventDefault();
+  const direction = event.deltaY > 0 ? -1 : 1;
+  nudgePreviewZoom(direction * PREVIEW_ZOOM_STEP);
+};
+
+const onPreviewPanStart = (event) => {
+  if (event.button !== 0) return;
+  // Loupe mode: no pan — the lens follows the cursor instead.
+  if (previewMagnifierActive.value) return;
+  if (previewZoom.value === 1) return;
+  event.preventDefault();
+  isPreviewPanning.value = true;
+  previewPanStartX = event.clientX;
+  previewPanStartY = event.clientY;
+  previewPanOriginX = previewPanX.value;
+  previewPanOriginY = previewPanY.value;
+  window.addEventListener("mousemove", onPreviewPanMove);
+  window.addEventListener("mouseup", onPreviewPanEnd, { once: true });
+};
+
+const onPreviewPanMove = (event) => {
+  if (!isPreviewPanning.value) return;
+  previewPanX.value = previewPanOriginX + (event.clientX - previewPanStartX);
+  previewPanY.value = previewPanOriginY + (event.clientY - previewPanStartY);
+};
+
+const onPreviewPanEnd = () => {
+  isPreviewPanning.value = false;
+  if (typeof window !== "undefined") {
+    window.removeEventListener("mousemove", onPreviewPanMove);
+  }
 };
 
 const addFiles = async (fileList) => {
@@ -3858,6 +4011,12 @@ const applyExtractedData = (fileItem, data) => {
   fileItem.camposDudosos = Array.isArray(data.campos_dudosos)
     ? data.campos_dudosos
     : [];
+  fileItem.razonesCamposDudosos =
+    data.razones_campos_dudosos &&
+    typeof data.razones_campos_dudosos === "object" &&
+    !Array.isArray(data.razones_campos_dudosos)
+      ? data.razones_campos_dudosos
+      : {};
 
   fileItem.editableData = {
     filename: fileItem.name,
@@ -4057,7 +4216,12 @@ const openPreview = (file) => {
       `(type=${file.file?.type || "unknown"}, size=${file.file?.size ?? "?"} bytes)`,
   );
 
+  const switching = previewFile.value?.id !== file.id;
   previewFile.value = file;
+  if (switching) {
+    resetPreviewTransform();
+    magnifierVisible.value = false;
+  }
 
   if (file.objectUrl) {
     previewUrl.value = file.objectUrl;
@@ -4110,6 +4274,10 @@ const closePreview = () => {
   // Do not revoke here — objectUrl is owned by the file item until remove/clear.
   previewFile.value = null;
   previewUrl.value = null;
+  magnifierVisible.value = false;
+  resetMagnifierZoom();
+  resetPreviewTransform();
+  onPreviewPanEnd();
 };
 
 const getStatusLabel = (status) => {
@@ -4151,6 +4319,32 @@ const getScoreClasses = (score) => {
 const isFieldDudoso = (file, field) =>
   Array.isArray(file?.camposDudosos) && file.camposDudosos.includes(field);
 
+// Hover text explaining why a highlighted (score < 3) field needs review.
+const DEFAULT_DUDOSO_REASON =
+  "Imagen poco clara: no se pudo leer este valor con certeza total.";
+const getDudosoReason = (file, field) => {
+  if (!isFieldDudoso(file, field)) return "";
+  const reason = file?.razonesCamposDudosos?.[field];
+  return typeof reason === "string" && reason.trim()
+    ? reason.trim()
+    : DEFAULT_DUDOSO_REASON;
+};
+
+// Summary of all field reasons for the score badge when score < 3.
+const getScoreReasonSummary = (file) => {
+  if (!file?.score || file.score >= 3) return "";
+  const fields = Array.isArray(file.camposDudosos) ? file.camposDudosos : [];
+  if (fields.length === 0) {
+    return "Baja confianza: revisar campos resaltados.";
+  }
+  return fields
+    .map((field) => {
+      const reason = getDudosoReason(file, field);
+      return reason ? `${field}: ${reason}` : field;
+    })
+    .join("\n");
+};
+
 // Shared classes for the yellow "needs manual validation" highlight.
 const DUDOSO_FIELD_CLASSES =
   "bg-amber-100 ring-1 ring-amber-400 focus:ring-amber-400";
@@ -4180,7 +4374,8 @@ const processAll = async () => {
   // re-process keep the current one so attempts group together.
   const hasPriorResults = files.value.some(
     (f) =>
-      (f.status === "done" || f.status === "duplicate") && !pendingFiles.includes(f),
+      (f.status === "done" || f.status === "duplicate") &&
+      !pendingFiles.includes(f),
   );
   if (!extractionSessionId.value || !hasPriorResults) {
     beginExtractionSession();

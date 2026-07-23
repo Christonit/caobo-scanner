@@ -4,16 +4,31 @@ import type {
   ClientBusinessRuleWithAttributes,
 } from "~/composables/useClientBusinessRules";
 
+/** Minimal shape accepted by the form (client or org rules). */
+type BusinessRuleFormInitial = {
+  rule_name: string;
+  business_rule_attributes: Array<{
+    id: number;
+    rule_type: string;
+    rule_value: string | null;
+    description: string | null;
+  }>;
+};
+
 const props = withDefaults(
   defineProps<{
     submitting?: boolean;
-    initial?: ClientBusinessRuleWithAttributes | null;
+    initial?: BusinessRuleFormInitial | ClientBusinessRuleWithAttributes | null;
     submitLabel?: string;
+    /** Shown under the rule-name field; defaults to client-scoped copy. */
+    scopeHint?: string;
   }>(),
   {
     submitting: false,
     initial: null,
     submitLabel: "Crear regla",
+    scopeHint:
+      "Agrupa reglas de negocio que ayudan a la IA a tomar mejores decisiones para este cliente.",
   }
 );
 
@@ -34,7 +49,7 @@ type AttributeRow = {
 };
 
 function rowsFromInitial(
-  rule: ClientBusinessRuleWithAttributes | null | undefined
+  rule: BusinessRuleFormInitial | null | undefined
 ): AttributeRow[] {
   if (!rule?.business_rule_attributes?.length) {
     return [{ key: nextId(), ruleType: "", ruleValue: "", description: "" }];
@@ -123,8 +138,7 @@ function onSubmit() {
         placeholder="Ej. Clasificación de gastos, Excepciones de facturación"
       />
       <p class="mt-1.5 text-xs text-gray-400">
-        Agrupa reglas de negocio que ayudan a la IA a tomar mejores decisiones
-        para este cliente.
+        {{ scopeHint }}
       </p>
     </div>
 

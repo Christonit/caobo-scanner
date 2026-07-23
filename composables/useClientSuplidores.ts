@@ -19,6 +19,23 @@ export const TIPO_DE_FACTURA_OPTIONS = [
 
 export type TipoDeFactura = (typeof TIPO_DE_FACTURA_OPTIONS)[number];
 
+export const TIPO_DE_DOCUMENTO_OPTIONS = [
+  "RNC",
+  "CEDULA",
+  "PASAPORTE",
+] as const;
+
+export type TipoDeDocumento = (typeof TIPO_DE_DOCUMENTO_OPTIONS)[number];
+
+/** Infer document type from digit-only documento (same rules as the backend). */
+export function inferTipoDeDocumento(documento: string | null | undefined): string {
+  const d = (documento || "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.length === 9) return "RNC";
+  if (d.length === 11) return "CEDULA";
+  return "PASAPORTE";
+}
+
 export const useClientSuplidores = () => {
   const supabase = useSupabaseClient<Database>();
 
@@ -99,6 +116,22 @@ export const useClientSuplidores = () => {
     return update(id, { registered_on_platform: value });
   }
 
+  /** Bulk set registered_on_platform for many suplidores at once. */
+  async function markManyAsRegistered(
+    ids: string[],
+    value = true
+  ): Promise<void> {
+    if (!ids.length) return;
+    const { error } = await supabase
+      .from("client_suplidores")
+      .update({
+        registered_on_platform: value,
+        updated_at: new Date().toISOString(),
+      })
+      .in("id", ids);
+    if (error) throw error;
+  }
+
   async function remove(id: string): Promise<void> {
     const { error } = await supabase
       .from("client_suplidores")
@@ -147,6 +180,7 @@ export const useClientSuplidores = () => {
     create,
     update,
     markAsRegistered,
+    markManyAsRegistered,
     remove,
     upsertFromScan,
   };

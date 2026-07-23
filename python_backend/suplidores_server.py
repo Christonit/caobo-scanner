@@ -93,6 +93,9 @@ Eres un contador experto radicado en República Dominicana. \
 Analiza TODAS las imágenes de facturas/recibos adjuntas y extrae TODOS los SUPLIDORES \
 (proveedores que emiten los documentos) únicos que encuentres.
 
+Cada imagen tiene un número de página absoluto del documento (indicado abajo). \
+Úsalo para reportar en qué página aparece cada suplidor.
+
 Para cada suplidor extrae:
 - nombre: nombre o razón social (máx. 255 caracteres).
 - documento: SOLO DÍGITOS del RNC / Cédula / Pasaporte, sin guiones ni espacios \
@@ -100,12 +103,109 @@ Para cada suplidor extrae:
 - tipo_de_factura: EXACTAMENTE uno de: Formal, Informal, Internacional, Pagos al exterior.
   Regla: RNC + NCF formal → "Formal"; sin NCF formal → "Informal"; \
   suplidor extranjero → "Internacional" o "Pagos al exterior".
+- score: entero 1, 2 o 3 de confianza en esta extracción:
+  + 3 = muy seguro (nombre y documento claros y legibles)
+  + 2 = algo seguro (algún campo borroso o incompleto)
+  + 1 = poco seguro (datos dudosos o casi ilegibles)
+- pagina: número de página absoluto (entero) de la imagen donde aparece este suplidor.
 
 Devuelve un JSON con la clave "suplidores" que contenga un array:
-{"suplidores": [{"nombre": "...", "documento": "...", "tipo_de_factura": "..."}, ...]}
+{"suplidores": [{"nombre": "...", "documento": "...", "tipo_de_factura": "...", "score": 3, "pagina": 1}, ...]}
 Si no encuentras ningún suplidor, devuelve {"suplidores": []}.
 No incluyas texto fuera del JSON.
 """
+
+
+def _clean_business_rules(rules: Optional[list]) -> list[dict]:
+    """Normalize free-form business-rule context for the suplidores prompt."""
+    if not rules:
+        return []
+    cleaned = []
+    for entry in rules:
+        if not isinstance(entry, dict):
+            continue
+        rule_type = str(entry.get("rule_type", "") or "").strip()
+        if not rule_type:
+            continue
+        cleaned.append({
+            "rule_type": rule_type,
+            "rule_value": str(entry.get("rule_value", "") or "").strip(),
+            "description": str(entry.get("description", "") or "").strip(),
+        })
+    return cleaned
+
+
+def _parse_business_rules_param(raw: Optional[str]) -> list[dict]:
+    if not raw or not str(raw).strip():
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return _clean_business_rules(parsed)
+
+
+def _build_suplidores_business_rules_block(business_rules: list[dict]) -> str:
+    if not business_rules:
+        return ""
+    lines = []
+    for rule in business_rules:
+        label = rule["rule_type"]
+        if rule.get("rule_value"):
+            label += f" ({rule['rule_value']})"
+        if rule.get("description"):
+            lines.append(f"  - {label}: {rule['description']}")
+        else:
+            lines.append(f"  - {label}")
+    return (
+        "\n\nADICIONAL - Reglas de negocio de la organización "
+        "(contexto para ayudarte a identificar y clasificar suplidores; "
+        "NO son valores fijos que debas copiar literalmente):\n"
+        + "\n".join(lines)
+        + "\n"
+    )
+
+
+def _clamp_score(raw) -> int:
+    """Normalize model score to 1–3; default 2 when missing/invalid."""
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return 2
+    if n < 1:
+        return 1
+    if n > 3:
+        return 3
+    return n
+
+
+def _build_suplidores_prompt(
+    business_rules: Optional[list[dict]] = None,
+    page_start: int = 1,
+    page_count: int = 1,
+) -> str:
+    """
+    Build the batch prompt including absolute page labels for each image
+    and optional org business rules.
+    """
+    page_lines = []
+    for i in range(page_count):
+        page_num = page_start + i
+        page_lines.append(
+            f"  - Imagen {i + 1} = página {page_num} del documento"
+        )
+    pages_block = (
+        "\n\nPáginas de este lote (usa estos números en el campo 'pagina'):\n"
+        + "\n".join(page_lines)
+        + "\n"
+    )
+    return (
+        SUPLIDORES_BATCH_PROMPT
+        + pages_block
+        + _build_suplidores_business_rules_block(business_rules or [])
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -140,14 +240,26 @@ def _extract_suplidores_from_batch(
     batch_num: int,
     model_name: str,
     spend_ctx: Optional[dict] = None,
+    business_rules: Optional[list[dict]] = None,
+    page_start: int = 1,
 ) -> tuple[list[dict], Optional[dict]]:
     """
     Send a batch of PIL images to Gemini and return (raw suplidor dicts,
     usage_record). Returns ([], None) on any failure.
+
+    page_start: absolute 1-based page number of the first image in this batch.
     """
     import time
 
-    parts = [SUPLIDORES_BATCH_PROMPT] + images
+    page_count = len(images)
+    page_end = page_start + page_count - 1
+    parts = [
+        _build_suplidores_prompt(
+            business_rules,
+            page_start=page_start,
+            page_count=page_count,
+        )
+    ] + images
     ctx = spend_ctx or {}
     level = ctx.get("thinking_level") or resolve_thinking_level(None, model_name)
 
@@ -156,13 +268,13 @@ def _extract_suplidores_from_batch(
             print(
                 f"[INFO] [suplidor-batch-{batch_num}] calling Gemini "
                 f"(attempt {attempt + 1}/3, model={model_name}, "
-                f"images={len(images)})"
+                f"images={len(images)}, pages={page_start}-{page_end})"
             )
             response = generate_inference_content(
                 model_name,
                 parts,
                 thinking_level=level,
-                max_output_tokens=1024,
+                max_output_tokens=1536,
                 temperature=0.1,
             )
             usage_record = record_usage_from_response(
@@ -188,11 +300,20 @@ def _extract_suplidores_from_batch(
                 tipo = str(row.get("tipo_de_factura", "") or "").strip()
                 if tipo not in TIPO_DE_FACTURA_OPTIONS_SUPLIDOR:
                     tipo = ""
+                score = _clamp_score(row.get("score"))
+                try:
+                    pagina = int(row.get("pagina") or page_start)
+                except (TypeError, ValueError):
+                    pagina = page_start
+                if pagina < page_start or pagina > page_end:
+                    pagina = page_start
                 if nombre:
                     result.append({
                         "nombre": nombre,
                         "documento": documento,
                         "tipo_de_factura": tipo,
+                        "score": score,
+                        "pagina": pagina,
                     })
             print(f"[DEBUG] [suplidor-batch-{batch_num}] found {len(result)} suplidores")
             return result, usage_record
@@ -210,6 +331,7 @@ def extract_suplidores_from_file(
     filename: str,
     model_name: Optional[str] = None,
     spend_ctx: Optional[dict] = None,
+    business_rules: Optional[list[dict]] = None,
 ) -> dict:
     """
     Render all pages of a PDF (or a single image) and process them in batches
@@ -217,6 +339,9 @@ def extract_suplidores_from_file(
 
     model_name: optional client-selected model (thinking level). Falls back
     to SUPLIDOR_MODEL when omitted or not whitelisted.
+
+    business_rules: optional org-level Anotaciones del Negocio fed into each
+    Gemini batch prompt.
 
     Returns:
         {
@@ -255,19 +380,27 @@ def extract_suplidores_from_file(
     if not all_images:
         return {"page_count": 0, "suplidores": [], "usage": None}
 
+    rules = business_rules or []
     all_rows: list[dict] = []
     usages: list[dict] = []
     for i in range(0, len(all_images), SUPLIDOR_BATCH_SIZE):
         batch = all_images[i: i + SUPLIDOR_BATCH_SIZE]
         batch_num = i // SUPLIDOR_BATCH_SIZE + 1
+        page_start = i + 1  # 1-based absolute page of first image in batch
         rows, usage = _extract_suplidores_from_batch(
-            batch, batch_num, model_id, spend_ctx=spend_ctx,
+            batch,
+            batch_num,
+            model_id,
+            spend_ctx=spend_ctx,
+            business_rules=rules,
+            page_start=page_start,
         )
         all_rows.extend(rows)
         if usage:
             usages.append(usage)
 
     # Deduplicate: prefer the first occurrence of each (documento OR nombre) key.
+    # Keep the higher score when merging duplicates.
     seen_docs: set[str] = set()
     seen_names: set[str] = set()
     unique: list[dict] = []
@@ -276,10 +409,23 @@ def extract_suplidores_from_file(
         name_key = row["nombre"].lower()
         if doc_key:
             if doc_key in seen_docs:
+                # Upgrade score on existing match if this one is higher.
+                for existing in unique:
+                    if existing["documento"].lower() == doc_key:
+                        if row["score"] > existing["score"]:
+                            existing["score"] = row["score"]
+                            existing["pagina"] = row["pagina"]
+                        break
                 continue
             seen_docs.add(doc_key)
         else:
             if name_key in seen_names:
+                for existing in unique:
+                    if not existing["documento"] and existing["nombre"].lower() == name_key:
+                        if row["score"] > existing["score"]:
+                            existing["score"] = row["score"]
+                            existing["pagina"] = row["pagina"]
+                        break
                 continue
             seen_names.add(name_key)
 
@@ -288,6 +434,8 @@ def extract_suplidores_from_file(
             "documento": row["documento"],
             "tipo_de_documento": _get_tipo_documento(row["documento"]),
             "tipo_de_factura": row["tipo_de_factura"],
+            "score": row["score"],
+            "pagina": row["pagina"],
         })
 
     print(
@@ -355,6 +503,7 @@ async def scan_suplidores(
     user_id: Optional[str] = Form(None),
     organization_id: Optional[str] = Form(None),
     client_id: Optional[str] = Form(None),
+    business_rules: Optional[str] = Form(None),
 ):
     """
     Extract all unique suplidores from a PDF (all pages, batched) or image.
@@ -364,6 +513,9 @@ async def scan_suplidores(
 
     thinking_level / user_id / organization_id / client_id: optional spend
     attribution for api_token_usage persistence.
+
+    business_rules: optional JSON-encoded array of {rule_type, rule_value,
+    description} (org-level Anotaciones del Negocio).
 
     Returns:
         {
@@ -394,9 +546,11 @@ async def scan_suplidores(
         "organization_id": (organization_id or "").strip() or None,
         "client_id": (client_id or "").strip() or None,
     }
+    business_rules_list = _parse_business_rules_param(business_rules)
     print(
         f"[INFO] [/scan-suplidores] Received '{file.filename}' "
-        f"({len(file_content)} bytes, model={model_id}, level={level})"
+        f"({len(file_content)} bytes, model={model_id}, level={level}, "
+        f"rules={len(business_rules_list)})"
     )
 
     async with gemini_semaphore:
@@ -406,6 +560,7 @@ async def scan_suplidores(
             file.filename,
             model_id,
             spend_ctx,
+            business_rules_list,
         )
 
     return result

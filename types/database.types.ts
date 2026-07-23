@@ -123,6 +123,10 @@ export type Database = {
           tax_payer_id: string | null;
           email: string | null;
           notes: string | null;
+          // ERP catalogs used during extraction (configured on client detail).
+          concepto_document_id: string | null;
+          tipo_de_pago_document_id: string | null;
+          tipo_de_gasto_context_document_id: string | null;
           created_at: string;
           updated_at: string;
           deleted_at: string | null;
@@ -135,6 +139,9 @@ export type Database = {
           tax_payer_id?: string | null;
           email?: string | null;
           notes?: string | null;
+          concepto_document_id?: string | null;
+          tipo_de_pago_document_id?: string | null;
+          tipo_de_gasto_context_document_id?: string | null;
           deleted_at?: string | null;
         };
         Update: {
@@ -142,6 +149,10 @@ export type Database = {
           tax_payer_id?: string | null;
           email?: string | null;
           notes?: string | null;
+          concepto_document_id?: string | null;
+          tipo_de_pago_document_id?: string | null;
+          tipo_de_gasto_context_document_id?: string | null;
+          updated_at?: string;
           deleted_at?: string | null;
         };
       };
@@ -221,6 +232,46 @@ export type Database = {
         Insert: {
           id?: number;
           client_business_rule_id: string;
+          rule_type: string;
+          rule_value?: string | null;
+          description?: string | null;
+        };
+        Update: {
+          rule_type?: string;
+          rule_value?: string | null;
+          description?: string | null;
+        };
+      };
+      organization_business_rules: {
+        Row: {
+          id: string;
+          organization_id: string;
+          rule_name: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          rule_name: string;
+        };
+        Update: {
+          rule_name?: string;
+          updated_at?: string;
+        };
+      };
+      organization_business_rule_attributes: {
+        Row: {
+          id: number;
+          organization_business_rule_id: string;
+          rule_type: string;
+          rule_value: string | null;
+          description: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          organization_business_rule_id: string;
           rule_type: string;
           rule_value?: string | null;
           description?: string | null;

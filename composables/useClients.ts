@@ -7,6 +7,13 @@ export interface ClientInput {
   taxPayerId: string;
 }
 
+/** ERP catalogs used when extracting receipts for this client. */
+export interface ClientExtractionDocuments {
+  conceptoDocumentId: string | null;
+  tipoDePagoDocumentId: string | null;
+  tipoDeGastoContextDocumentId: string | null;
+}
+
 export const useClients = () => {
   const supabase = useSupabaseClient<Database>();
   const user = useSupabaseUser();
@@ -75,6 +82,57 @@ export const useClients = () => {
     return data as Client;
   }
 
+  /**
+   * Persist which client_documents feed Concepto / Tipo de Pago / Tipo de
+   * Gasto context during extraction. Empty string → null (clear).
+   * Each id must belong to this client when set.
+   */
+  async function updateExtractionDocuments(
+    clientId: string,
+    prefs: ClientExtractionDocuments,
+  ): Promise<Client> {
+    const ids = [
+      prefs.conceptoDocumentId,
+      prefs.tipoDePagoDocumentId,
+      prefs.tipoDeGastoContextDocumentId,
+    ].filter((id): id is string => Boolean(id));
+
+    if (ids.length) {
+      const { data: docs, error: docsError } = await supabase
+        .from("client_documents")
+        .select("id, client_id")
+        .in("id", ids);
+      if (docsError) throw docsError;
+      const owned = new Set(
+        (docs ?? [])
+          .filter((d) => d.client_id === clientId)
+          .map((d) => d.id),
+      );
+      for (const id of ids) {
+        if (!owned.has(id)) {
+          throw new Error(
+            "Uno de los documentos seleccionados no pertenece a este cliente.",
+          );
+        }
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("clients")
+      .update({
+        concepto_document_id: prefs.conceptoDocumentId || null,
+        tipo_de_pago_document_id: prefs.tipoDePagoDocumentId || null,
+        tipo_de_gasto_context_document_id:
+          prefs.tipoDeGastoContextDocumentId || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", clientId)
+      .select("*")
+      .single();
+    if (error) throw error;
+    return data as Client;
+  }
+
   async function remove(id: string): Promise<void> {
     const { error } = await supabase
       .from("clients")
@@ -83,5 +141,5 @@ export const useClients = () => {
     if (error) throw error;
   }
 
-  return { list, get, create, remove };
+  return { list, get, create, updateExtractionDocuments, remove };
 };

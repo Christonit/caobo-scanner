@@ -105,6 +105,35 @@ const userInitials = computed(() =>
     .map((p) => p[0]?.toUpperCase() ?? "")
     .join(""),
 );
+
+/** Pinned collapsed preference; hover still expands temporarily. */
+const sidebarCollapsed = ref(false);
+const sidebarHovered = ref(false);
+/** Blocks hover-expand right after clicking Contraer (cursor still over sidebar). */
+const hoverLocked = ref(false);
+const sidebarExpanded = computed(
+  () => !sidebarCollapsed.value || sidebarHovered.value,
+);
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value;
+  if (sidebarCollapsed.value) {
+    orgMenuOpen.value = false;
+    hoverLocked.value = true;
+    sidebarHovered.value = false;
+  }
+}
+
+function onSidebarEnter() {
+  if (hoverLocked.value) return;
+  sidebarHovered.value = true;
+}
+
+function onSidebarLeave() {
+  hoverLocked.value = false;
+  sidebarHovered.value = false;
+  if (sidebarCollapsed.value) orgMenuOpen.value = false;
+}
 </script>
 
 <template>
@@ -113,28 +142,41 @@ const userInitials = computed(() =>
       <div class="flex min-h-screen">
         <!-- Sidebar -->
         <aside
-          class="fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-gray-200 bg-white"
+          class="fixed inset-y-0 left-0 z-[100] flex flex-col border-r border-gray-200 bg-white transition-[width,box-shadow] duration-200 ease-out"
+          :class="[
+            sidebarExpanded ? 'w-60' : 'w-16',
+            sidebarCollapsed && sidebarHovered ? 'shadow-lg' : '',
+          ]"
+          @mouseenter="onSidebarEnter"
+          @mouseleave="onSidebarLeave"
         >
           <!-- Logo / org switcher (multi-org members + superadmins) -->
-          <div class="relative px-4 py-4">
+          <div class="relative py-4" :class="sidebarExpanded ? 'px-4' : 'px-3'">
             <button
               type="button"
               :disabled="!canSwitchOrgs || switchingOrg"
+              :title="activeOrg?.name ?? 'Caobo Recibos'"
               @click="orgMenuOpen = canSwitchOrgs ? !orgMenuOpen : false"
               class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition"
-              :class="canSwitchOrgs ? 'hover:bg-gray-100' : 'cursor-default'"
+              :class="[
+                canSwitchOrgs ? 'hover:bg-gray-100' : 'cursor-default',
+                sidebarExpanded ? '' : 'justify-center px-0',
+              ]"
             >
               <span
-                class="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white"
+                class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white"
               >
                 {{ orgInitial }}
               </span>
-              <span class="flex-1 truncate text-sm font-semibold text-gray-900">
+              <span
+                v-show="sidebarExpanded"
+                class="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900"
+              >
                 {{ activeOrg?.name ?? "Caobo Recibos" }}
               </span>
               <svg
-                v-if="canSwitchOrgs"
-                class="h-4 w-4 text-gray-400 transition"
+                v-if="canSwitchOrgs && sidebarExpanded"
+                class="h-4 w-4 flex-shrink-0 text-gray-400 transition"
                 :class="orgMenuOpen ? 'rotate-180' : ''"
                 fill="none"
                 stroke="currentColor"
@@ -150,7 +192,7 @@ const userInitials = computed(() =>
             </button>
 
             <div
-              v-if="canSwitchOrgs && orgMenuOpen"
+              v-if="canSwitchOrgs && orgMenuOpen && sidebarExpanded"
               class="absolute left-4 right-4 top-full z-40 mt-1 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
             >
               <p
@@ -187,23 +229,25 @@ const userInitials = computed(() =>
           </div>
 
           <!-- Nav -->
-          <nav class="flex-1 space-y-0.5 px-3">
+          <nav class="flex-1 space-y-0.5 overflow-y-auto px-3">
             <div
               v-for="item in navWithTeam"
-              :key="item.to"
-              :class="item.children ? 'group/submenu' : ''"
+              :key="item.label"
+              :class="item.children && sidebarExpanded ? 'group/submenu' : ''"
             >
               <NuxtLink
                 :to="item.to"
-                class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition"
-                :class="
+                :title="item.label"
+                class="group flex items-center rounded-lg py-2 text-sm font-medium transition"
+                :class="[
+                  sidebarExpanded ? 'gap-3 px-3' : 'justify-center px-0',
                   isNavActive(item.to, item.children)
                     ? 'bg-emerald-50 text-emerald-700'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                "
+                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+                ]"
               >
                 <span
-                  class="flex h-5 w-5 items-center justify-center"
+                  class="flex h-5 w-5 flex-shrink-0 items-center justify-center"
                   :class="
                     isNavActive(item.to, item.children)
                       ? 'text-emerald-600'
@@ -301,11 +345,13 @@ const userInitials = computed(() =>
                     />
                   </svg>
                 </span>
-                {{ item.label }}
+                <span v-show="sidebarExpanded" class="truncate">{{
+                  item.label
+                }}</span>
                 <!-- Chevron indicator for items with children -->
                 <svg
-                  v-if="item.children"
-                  class="ml-auto h-3.5 w-3.5 text-gray-400 transition group-hover/submenu:rotate-180"
+                  v-if="item.children && sidebarExpanded"
+                  class="ml-auto h-3.5 w-3.5 flex-shrink-0 text-gray-400 transition group-hover/submenu:rotate-180"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -321,7 +367,7 @@ const userInitials = computed(() =>
 
               <!-- Inline submenu — expands in flow and pushes items below -->
               <div
-                v-if="item.children"
+                v-if="item.children && sidebarExpanded"
                 class="hidden flex-col group-hover/submenu:flex"
               >
                 <NuxtLink
@@ -347,19 +393,50 @@ const userInitials = computed(() =>
             </div>
           </nav>
 
-          <!-- Settings + logged-in user + sign out -->
+          <!-- Collapse toggle + settings + logged-in user + sign out -->
           <div class="border-t border-gray-200 p-3">
-            <NuxtLink
-              to="/settings"
-              class="group mb-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition"
-              :class="
-                route.path === '/settings'
-                  ? 'bg-emerald-50 text-emerald-700'
-                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-              "
+            <button
+              type="button"
+              :title="sidebarCollapsed ? 'Expandir menú' : 'Contraer menú'"
+              @click="toggleSidebar"
+              class="group mb-1 flex w-full items-center rounded-lg py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
+              :class="sidebarExpanded ? 'gap-3 px-3' : 'justify-center px-0'"
             >
               <span
-                class="flex h-5 w-5 items-center justify-center"
+                class="flex h-5 w-5 flex-shrink-0 items-center justify-center text-gray-400 group-hover:text-gray-600"
+              >
+                <svg
+                  class="h-5 w-5 transition"
+                  :class="sidebarCollapsed ? 'rotate-180' : ''"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                    d="M11 19l-7-7 7-7m8 14l-7-7 7-7"
+                  />
+                </svg>
+              </span>
+              <span v-show="sidebarExpanded">{{
+                sidebarCollapsed ? "Expandir" : "Contraer"
+              }}</span>
+            </button>
+            <NuxtLink
+              to="/settings"
+              title="Configuración"
+              class="group mb-1 flex items-center rounded-lg py-2 text-sm font-medium transition"
+              :class="[
+                sidebarExpanded ? 'gap-3 px-3' : 'justify-center px-0',
+                route.path === '/settings'
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+              ]"
+            >
+              <span
+                class="flex h-5 w-5 flex-shrink-0 items-center justify-center"
                 :class="
                   route.path === '/settings'
                     ? 'text-emerald-600'
@@ -386,15 +463,19 @@ const userInitials = computed(() =>
                   />
                 </svg>
               </span>
-              Configuración
+              <span v-show="sidebarExpanded">Configuración</span>
             </NuxtLink>
-            <div class="flex items-center gap-3 px-1 py-1.5">
+            <div
+              class="flex items-center py-1.5"
+              :class="sidebarExpanded ? 'gap-3 px-1' : 'justify-center px-0'"
+              :title="displayName"
+            >
               <span
                 class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gray-200 text-xs font-semibold text-gray-600"
               >
                 {{ userInitials }}
               </span>
-              <div class="min-w-0 flex-1">
+              <div v-show="sidebarExpanded" class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium text-gray-900">
                   {{ displayName }}
                 </p>
@@ -402,11 +483,14 @@ const userInitials = computed(() =>
               </div>
             </div>
             <button
+              type="button"
+              title="Cerrar sesión"
               @click="signOut"
-              class="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
+              class="mt-1 flex w-full items-center rounded-lg py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
+              :class="sidebarExpanded ? 'gap-2 px-3' : 'justify-center px-0'"
             >
               <svg
-                class="h-5 w-5 text-gray-400"
+                class="h-5 w-5 flex-shrink-0 text-gray-400"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -418,13 +502,16 @@ const userInitials = computed(() =>
                   d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1"
                 />
               </svg>
-              Cerrar sesión
+              <span v-show="sidebarExpanded">Cerrar sesión</span>
             </button>
           </div>
         </aside>
 
-        <!-- Main content -->
-        <main class="min-w-0 flex-1 pl-60 min-h-screen py-8">
+        <!-- Main content — reserved width follows pinned state (hover overlays) -->
+        <main
+          class="min-h-screen min-w-0 flex-1 py-8 transition-[padding] duration-200 ease-out"
+          :class="sidebarCollapsed ? 'pl-16' : 'pl-60'"
+        >
           <slot />
         </main>
       </div>

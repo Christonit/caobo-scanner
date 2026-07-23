@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import type { Client } from "~/composables/useClients";
 import type { ClientSuplidor } from "~/composables/useClientSuplidores";
-import { TIPO_DE_FACTURA_OPTIONS } from "~/composables/useClientSuplidores";
+import {
+  TIPO_DE_FACTURA_OPTIONS,
+  TIPO_DE_DOCUMENTO_OPTIONS,
+  inferTipoDeDocumento,
+} from "~/composables/useClientSuplidores";
+import {
+  buildSuplidoresExportFilename,
+  downloadSuplidoresCargaMasiva,
+  getSuplidorScoreClasses,
+  getSuplidorScoreLabel,
+} from "~/utils/suplidoresExport";
 
 const API_BASE = useApiBase();
 const { model: thinkingModel } = useThinkingLevel();
@@ -9,8 +19,38 @@ const { appendSpendAttribution } = useSpendAttribution();
 
 // ── Clients ───────────────────────────────────────────────────────────────────
 const { list: listClients } = useClients();
-const { listByClient, upsertFromScan } = useClientSuplidores();
+const { listByClient, upsertFromScan, markAsRegistered, markManyAsRegistered } =
+  useClientSuplidores();
+const { listByOrganization: listOrgBusinessRules } =
+  useOrganizationBusinessRules();
+const { activeOrg } = useOrganization();
 const { log: logActivity } = useActivityLog();
+
+// Org-wide Anotaciones del Negocio — fed into every scan-suplidores call.
+const orgBusinessRulesPayload = ref<
+  Array<{ rule_type: string; rule_value: string; description: string }>
+>([]);
+
+async function loadOrgBusinessRules() {
+  const orgId = activeOrg.value?.id;
+  if (!orgId) {
+    orgBusinessRulesPayload.value = [];
+    return;
+  }
+  try {
+    const rules = await listOrgBusinessRules(orgId);
+    orgBusinessRulesPayload.value = rules.flatMap((rule) =>
+      (rule.business_rule_attributes ?? []).map((a) => ({
+        rule_type: a.rule_type,
+        rule_value: a.rule_value || "",
+        description: a.description || "",
+      })),
+    );
+  } catch (err) {
+    console.warn("[Org business rules] No se pudieron cargar:", err);
+    orgBusinessRulesPayload.value = [];
+  }
+}
 
 // Extraction workflow id for this page (analyze / store / export).
 const extractionSessionId = ref("");
@@ -35,11 +75,17 @@ const selectedClient = computed(
 const dbSuplidores = ref<ClientSuplidor[]>([]);
 const loadingDb = ref(false);
 const dbError = ref<string | null>(null);
+const selectedDbIds = ref<Set<string>>(new Set());
 
 async function loadDbSuplidores() {
-  if (!selectedClientId.value) { dbSuplidores.value = []; return; }
+  if (!selectedClientId.value) {
+    dbSuplidores.value = [];
+    selectedDbIds.value = new Set();
+    return;
+  }
   loadingDb.value = true;
   dbError.value = null;
+  selectedDbIds.value = new Set();
   try {
     dbSuplidores.value = await listByClient(selectedClientId.value);
   } catch (e: any) {
@@ -112,40 +158,54 @@ interface ExtractedSuplidor {
   documento: string;
   tipo_de_documento: string;
   tipo_de_factura: string;
+  score: number;               // 1–3 confidence from the model
+  pageIndex: number;           // 1-based page in source file
+  sourceFile: File | null;     // original upload for single-image preview
+  sourceFilename: string;
   isNew: boolean;              // not yet in our DB
   alreadyInSystem: boolean;    // registered_on_platform / already in Citrus
   selected: boolean;           // row checkbox — false when alreadyInSystem
 }
 const extractedSuplidores = ref<ExtractedSuplidor[]>([]);
 
-/** Rows that can be exported or saved (not already registered in Citrus). */
-const actionableExtracted = computed(() =>
-  extractedSuplidores.value.filter((s) => !s.alreadyInSystem),
-);
+/** Rows that can be exported or saved (any extracted row can be selected for export). */
+const selectableExtracted = computed(() => extractedSuplidores.value);
 
 const allExtractedSelected = computed(
   () =>
-    actionableExtracted.value.length > 0 &&
-    actionableExtracted.value.every((s) => s.selected),
+    selectableExtracted.value.length > 0 &&
+    selectableExtracted.value.every((s) => s.selected),
 );
 function toggleAllExtracted() {
   const val = !allExtractedSelected.value;
-  actionableExtracted.value.forEach((s) => {
+  selectableExtracted.value.forEach((s) => {
     s.selected = val;
   });
 }
 function removeExtracted(id: string) {
   extractedSuplidores.value = extractedSuplidores.value.filter((s) => s._id !== id);
 }
-// rows to act on: selected actionable ones, or all actionable if nothing is checked
-const activeExtracted = computed(() => {
-  const actionable = actionableExtracted.value;
-  const sel = actionable.filter((s) => s.selected);
-  return sel.length ? sel : actionable;
-});
+
+/** Explicitly checked rows for export (includes already-in-system). */
+const selectedExtracted = computed(() =>
+  extractedSuplidores.value.filter((s) => s.selected),
+);
+
+/** Selected rows that are new and can be saved to DB. */
+const selectedExtractedForSave = computed(() =>
+  selectedExtracted.value.filter(
+    (s) => s.nombre && !s.alreadyInSystem && s.isNew,
+  ),
+);
+
 const alreadyInSystemCount = computed(
   () => extractedSuplidores.value.filter((s) => s.alreadyInSystem).length,
 );
+
+function onExtractedDocumentoInput(s: ExtractedSuplidor) {
+  s.documento = s.documento.replace(/\D/g, "").slice(0, 20);
+  s.tipo_de_documento = inferTipoDeDocumento(s.documento);
+}
 
 const hasPending = computed(() =>
   fileRows.value.some((r) => r.selected && r.status === "pending"),
@@ -258,19 +318,93 @@ function clearExtractionQueue() {
   beginExtractionSession();
 }
 
-// ── Preview modal ─────────────────────────────────────────────────────────────
+// ── Preview modal (file queue = iframe; extracted suplidor = single image) ────
 const previewUrl = ref<string | null>(null);
 const previewName = ref("");
+const previewIsImage = ref(false);
+const previewLoading = ref(false);
 
-function openPreview(row: FileRow) {
-  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
-  previewUrl.value = URL.createObjectURL(row.file);
-  previewName.value = row.filename;
-}
 function closePreview() {
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
   previewUrl.value = null;
   previewName.value = "";
+  previewIsImage.value = false;
+  previewLoading.value = false;
+}
+
+function openFilePreview(row: FileRow) {
+  closePreview();
+  previewUrl.value = URL.createObjectURL(row.file);
+  previewName.value = row.filename;
+  previewIsImage.value = false; // use iframe for full file (PDF/image)
+}
+
+async function renderPdfPageAsObjectUrl(
+  file: File,
+  pageIndex: number,
+): Promise<string | null> {
+  const pdfjs = await loadPdfJs();
+  if (!pdfjs) return null;
+  const buf = await file.arrayBuffer();
+  // Match gastos PDF split: wasm/cmaps needed for scanned PDFs.
+  const doc = await pdfjs.getDocument({
+    data: new Uint8Array(buf),
+    wasmUrl: "/api/pdfjs/wasm/",
+    cMapUrl: "/api/pdfjs/cmaps/",
+    cMapPacked: true,
+    standardFontDataUrl: "/api/pdfjs/standard_fonts/",
+  }).promise;
+  const pageNum = Math.min(Math.max(1, pageIndex), doc.numPages);
+  const page = await doc.getPage(pageNum);
+  const viewport = page.getViewport({ scale: 1.5 });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  // pdf.js v5: pass `canvas` (do not getContext first).
+  await page.render({
+    canvas,
+    viewport,
+    background: "#ffffff",
+  }).promise;
+  return new Promise((resolve) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          resolve(null);
+          return;
+        }
+        resolve(URL.createObjectURL(blob));
+      },
+      "image/jpeg",
+      0.92,
+    );
+  });
+}
+
+async function openSuplidorPreview(s: ExtractedSuplidor) {
+  if (!s.sourceFile) return;
+  closePreview();
+  previewLoading.value = true;
+  previewName.value = `${s.nombre || "Suplidor"} · ${s.sourceFilename}${
+    s.pageIndex > 1 ? ` (pág. ${s.pageIndex})` : ""
+  }`;
+  previewIsImage.value = true;
+
+  try {
+    const ext = s.sourceFilename.split(".").pop()?.toLowerCase() ?? "";
+    if (ext === "pdf") {
+      const url = await renderPdfPageAsObjectUrl(s.sourceFile, s.pageIndex || 1);
+      if (!url) throw new Error("No se pudo renderizar la página.");
+      previewUrl.value = url;
+    } else {
+      previewUrl.value = URL.createObjectURL(s.sourceFile);
+    }
+  } catch (err: any) {
+    scanError.value = err?.message || "No se pudo abrir la vista previa.";
+    closePreview();
+  } finally {
+    previewLoading.value = false;
+  }
 }
 
 // ── AI analysis ───────────────────────────────────────────────────────────────
@@ -323,6 +457,12 @@ async function analyzeWithAI() {
       const fd = new FormData();
       fd.append("file", row.file);
       fd.append("model", thinkingModel.value);
+      if (orgBusinessRulesPayload.value.length) {
+        fd.append(
+          "business_rules",
+          JSON.stringify(orgBusinessRulesPayload.value),
+        );
+      }
       appendSpendAttribution(fd, { clientId: selectedClientId.value });
       const res = await fetch(`${API_BASE}/scan-suplidores`, {
         method: "POST",
@@ -358,6 +498,10 @@ async function analyzeWithAI() {
           documento: s.documento ?? "",
           tipo_de_documento: s.tipo_de_documento ?? "",
           tipo_de_factura: s.tipo_de_factura ?? "",
+          score: Number(s.score) >= 1 && Number(s.score) <= 3 ? Number(s.score) : 2,
+          pageIndex: Math.max(1, Number(s.pagina) || 1),
+          sourceFile: row.file,
+          sourceFilename: row.filename,
           isNew,
           alreadyInSystem,
           // Already in Citrus: not selectable for export/save
@@ -404,10 +548,7 @@ const saveSuccess = ref(false);
 
 async function saveToDatabase() {
   if (!selectedClientId.value) return;
-  // Never save rows already registered in Citrus; also skip ones already in DB
-  const toSave = activeExtracted.value.filter(
-    (s) => s.nombre && !s.alreadyInSystem && s.isNew,
-  );
+  const toSave = selectedExtractedForSave.value;
   if (!toSave.length) return;
 
   saving.value = true;
@@ -445,66 +586,129 @@ async function saveToDatabase() {
 
 // ── Download Carga Masiva template ────────────────────────────────────────────
 function buildSuplidoresFilename() {
-  const rawName = (selectedClient.value?.name || "cliente").trim() || "cliente";
-  const clientName = rawName
-    .replace(/[\\/:*?"<>|]+/g, "")
-    .replace(/\s+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_|_$/g, "");
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const stamp =
-    [pad(now.getDate()), pad(now.getMonth() + 1), now.getFullYear()].join("_") +
-    `_${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  return `${clientName || "cliente"}-carga_masiva_suplidores-${stamp}.xls`;
+  return buildSuplidoresExportFilename(selectedClient.value?.name);
 }
 
 async function downloadTemplate() {
-  // Exclude suppliers already registered in Citrus from the export template
-  const toDownload = activeExtracted.value.filter(
-    (s) => s.nombre && !s.alreadyInSystem,
-  );
+  // Export any explicitly selected rows (including already registered in Citrus).
+  const toDownload = selectedExtracted.value.filter((s) => s.nombre);
   if (!toDownload.length) return;
 
-  // Fill the official Carga Masiva .xls (same approach as gastos):
-  // copy template-suplidores.xls and write rows into "Listado de Suplidores".
-  const res = await fetch(`${API_BASE}/download-suplidores-carga-masiva`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(
+  try {
+    await downloadSuplidoresCargaMasiva(
+      API_BASE,
+      toDownload,
+      buildSuplidoresFilename(),
+    );
+    logActivity("suplidores_exported", {
+      clientId: selectedClientId.value,
+      targetLabel: selectedClient.value?.name ?? null,
+      metadata: withSession({
+        count: toDownload.length,
+        source: "extracted_suplidores",
+      }),
+    });
+  } catch (e: any) {
+    scanError.value = e?.message || "No se pudo generar la plantilla de suplidores.";
+  }
+}
+
+// ── DB table: selection, export, toggle / bulk register ───────────────────────
+const togglingId = ref<string | null>(null);
+const bulkRegistering = ref(false);
+const exportingDb = ref(false);
+const unregisterConfirmOpen = ref(false);
+const unregisterTarget = ref<ClientSuplidor | null>(null);
+
+/** All saved suplidores can be selected for export. */
+const selectableDb = computed(() => dbSuplidores.value);
+
+const selectedDbSuplidores = computed(() =>
+  dbSuplidores.value.filter((s) => selectedDbIds.value.has(s.id)),
+);
+
+/** Explicitly selected rows for export (registered or not). */
+const selectedDbForExport = computed(() =>
+  selectedDbSuplidores.value.filter((s) => s.nombre),
+);
+
+/** Selected unregistered rows for bulk "Registrar en el sistema". */
+const selectedDbForRegister = computed(() =>
+  selectedDbSuplidores.value.filter((s) => !s.registered_on_platform),
+);
+
+const allDbSelected = computed(
+  () =>
+    selectableDb.value.length > 0 &&
+    selectableDb.value.every((s) => selectedDbIds.value.has(s.id)),
+);
+
+function toggleAllDb() {
+  if (allDbSelected.value) {
+    selectedDbIds.value = new Set();
+    return;
+  }
+  selectedDbIds.value = new Set(selectableDb.value.map((s) => s.id));
+}
+
+function toggleDbRow(id: string, checked: boolean) {
+  const next = new Set(selectedDbIds.value);
+  if (checked) next.add(id);
+  else next.delete(id);
+  selectedDbIds.value = next;
+}
+
+async function exportDbSuplidores() {
+  const toDownload = selectedDbForExport.value;
+  if (!toDownload.length) return;
+
+  exportingDb.value = true;
+  scanError.value = null;
+  try {
+    await downloadSuplidoresCargaMasiva(
+      API_BASE,
       toDownload.map((s) => ({
         documento: s.documento,
         nombre: s.nombre,
         tipo_de_factura: s.tipo_de_factura,
       })),
-    ),
-  });
-  if (!res.ok) {
-    scanError.value = "No se pudo generar la plantilla de suplidores.";
-    return;
+      buildSuplidoresFilename(),
+    );
+    logActivity("suplidores_exported", {
+      clientId: selectedClientId.value,
+      targetLabel: selectedClient.value?.name ?? null,
+      metadata: withSession({
+        count: toDownload.length,
+        source: "saved_suplidores",
+      }),
+    });
+  } catch (e: any) {
+    scanError.value = e?.message || "No se pudo generar la plantilla de suplidores.";
+  } finally {
+    exportingDb.value = false;
   }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = buildSuplidoresFilename();
-  document.body.appendChild(a);
-  a.click();
-  URL.revokeObjectURL(url);
-  document.body.removeChild(a);
-
-  logActivity("suplidores_exported", {
-    clientId: selectedClientId.value,
-    targetLabel: selectedClient.value?.name ?? null,
-    metadata: withSession({ count: toDownload.length }),
-  });
 }
 
-// ── DB table: toggle registered ───────────────────────────────────────────────
-const { markAsRegistered } = useClientSuplidores();
-const togglingId = ref<string | null>(null);
-const unregisterConfirmOpen = ref(false);
-const unregisterTarget = ref<ClientSuplidor | null>(null);
+async function bulkRegisterSelected() {
+  const toRegister = selectedDbForRegister.value;
+  if (!toRegister.length) return;
+
+  bulkRegistering.value = true;
+  dbError.value = null;
+  try {
+    const ids = toRegister.map((s) => s.id);
+    await markManyAsRegistered(ids, true);
+    const idSet = new Set(ids);
+    dbSuplidores.value = dbSuplidores.value.map((s) =>
+      idSet.has(s.id) ? { ...s, registered_on_platform: true } : s,
+    );
+    selectedDbIds.value = new Set();
+  } catch (e: any) {
+    dbError.value = e?.message || "No se pudo marcar como registrados.";
+  } finally {
+    bulkRegistering.value = false;
+  }
+}
 
 async function toggleRegistered(s: ClientSuplidor) {
   if (s.registered_on_platform) {
@@ -544,8 +748,16 @@ const registeredDbCount = computed(
   () => dbSuplidores.value.filter((s) => s.registered_on_platform).length,
 );
 
+watch(
+  () => activeOrg.value?.id,
+  () => {
+    loadOrgBusinessRules();
+  },
+);
+
 onMounted(async () => {
   beginExtractionSession();
+  await loadOrgBusinessRules();
   clients.value = await listClients();
 });
 </script>
@@ -748,7 +960,7 @@ onMounted(async () => {
                         type="button"
                         class="rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
                         title="Vista previa"
-                        @click="openPreview(row)"
+                        @click="openFilePreview(row)"
                       >
                         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"
@@ -820,15 +1032,16 @@ onMounted(async () => {
               <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-400">Nuevos suplidores</h2>
               <p class="mt-0.5 text-sm text-gray-500">
                 Total de <span class="font-semibold text-gray-700">{{ extractedSuplidores.length }}</span>
-                {{ extractedSuplidores.length === 1 ? "suplidor" : "suplidores" }} extraídos
-                <template v-if="actionableExtracted.some(s => s.selected) && activeExtracted.length < actionableExtracted.length">
-                  · <span class="font-medium text-gray-700">{{ activeExtracted.length }} seleccionados</span>
-                </template>.
+                {{ extractedSuplidores.length === 1 ? "suplidor" : "suplidores" }} extraídos.
+                Edita los campos y marca los que quieras exportar o guardar.
+                <template v-if="selectedExtracted.length > 0">
+                  · <span class="font-medium text-gray-700">{{ selectedExtracted.length }} seleccionados</span>
+                </template>
                 <span v-if="extractedSuplidores.some(s => s.isNew && !s.alreadyInSystem)" class="text-amber-600">
                   {{ extractedSuplidores.filter(s => s.isNew && !s.alreadyInSystem).length }} nuevos.
                 </span>
                 <span v-if="alreadyInSystemCount > 0" class="text-emerald-600">
-                  {{ alreadyInSystemCount }} ya en Citrus (excluidos de exportar/guardar).
+                  {{ alreadyInSystemCount }} ya en Citrus.
                 </span>
               </p>
             </div>
@@ -837,15 +1050,17 @@ onMounted(async () => {
               <button
                 type="button"
                 class="rounded-lg border border-emerald-600 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-50"
-                :disabled="saving || activeExtracted.length === 0"
+                :disabled="saving || selectedExtracted.filter(s => s.nombre).length === 0"
+                :title="selectedExtracted.filter(s => s.nombre).length === 0 ? 'Selecciona al menos un suplidor' : undefined"
                 @click="downloadTemplate"
-              >Descargar plantilla</button>
+              >Exportar{{ selectedExtracted.filter(s => s.nombre).length ? ` (${selectedExtracted.filter(s => s.nombre).length})` : "" }}</button>
               <button
                 type="button"
                 class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
-                :disabled="saving || !activeExtracted.some(s => s.isNew)"
+                :disabled="saving || selectedExtractedForSave.length === 0"
+                :title="selectedExtractedForSave.length === 0 ? 'Selecciona suplidores nuevos para guardar' : undefined"
                 @click="saveToDatabase"
-              >{{ saving ? "Guardando…" : "Guardar" }}</button>
+              >{{ saving ? "Guardando…" : (selectedExtractedForSave.length ? `Guardar (${selectedExtractedForSave.length})` : "Guardar") }}</button>
             </div>
           </div>
 
@@ -858,15 +1073,17 @@ onMounted(async () => {
                     <input
                       type="checkbox"
                       :checked="allExtractedSelected"
-                      :disabled="actionableExtracted.length === 0"
+                      :disabled="selectableExtracted.length === 0"
                       class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600 disabled:opacity-40"
                       @change="toggleAllExtracted"
                     />
                   </th>
+                  <th class="w-16 px-3 py-3 text-center">Score</th>
                   <th class="px-5 py-3">Nombre</th>
                   <th class="px-5 py-3">Documento</th>
                   <th class="px-5 py-3">Tipo de Documento</th>
                   <th class="px-5 py-3">Tipo de Factura</th>
+                  <th class="w-12 px-3 py-3 text-center">Vista</th>
                   <th class="w-8 px-3 py-3"><span class="sr-only">Quitar</span></th>
                 </tr>
               </thead>
@@ -877,10 +1094,10 @@ onMounted(async () => {
                   class="group transition"
                   :class="[
                     s.alreadyInSystem
-                      ? 'bg-emerald-50/40 opacity-75'
-                      : s.isNew
-                        ? (s.selected ? 'bg-amber-50/60' : 'bg-white opacity-50')
-                        : (s.selected ? 'bg-sky-50/50' : 'bg-white opacity-50'),
+                      ? 'bg-emerald-50/40'
+                      : s.selected
+                        ? (s.isNew ? 'bg-amber-50/70' : 'bg-sky-50/60')
+                        : 'bg-white',
                   ]"
                 >
                   <!-- row checkbox -->
@@ -888,10 +1105,22 @@ onMounted(async () => {
                     <input
                       v-model="s.selected"
                       type="checkbox"
-                      :disabled="s.alreadyInSystem"
-                      class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
-                      :title="s.alreadyInSystem ? 'Ya está en Citrus — no se puede exportar ni guardar' : undefined"
+                      class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600"
+                      :title="s.selected ? 'Incluido en exportar' : 'Excluido — marca para incluir'"
                     />
+                  </td>
+
+                  <!-- Score -->
+                  <td class="px-3 py-3 text-center">
+                    <span
+                      v-if="s.score > 0"
+                      class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold"
+                      :class="getSuplidorScoreClasses(s.score)"
+                      :title="getSuplidorScoreLabel(s.score)"
+                    >
+                      {{ s.score }}
+                    </span>
+                    <span v-else class="text-gray-300">—</span>
                   </td>
 
                   <!-- Nombre + already-in-system badge -->
@@ -916,28 +1145,38 @@ onMounted(async () => {
                         type="text"
                         maxlength="255"
                         :disabled="s.alreadyInSystem"
-                        class="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-medium text-gray-900 outline-none hover:border-gray-200 focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400/20 disabled:cursor-not-allowed disabled:hover:border-transparent"
-                        :class="s.alreadyInSystem || !s.isNew ? 'text-gray-500' : ''"
+                        class="w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-sm font-medium text-gray-900 outline-none transition hover:border-gray-300 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/20 disabled:cursor-not-allowed disabled:border-transparent disabled:bg-transparent disabled:text-gray-500"
                       />
                     </div>
                   </td>
 
                   <!-- Documento -->
-                  <td class="px-5 py-3 font-mono text-xs text-gray-600">
+                  <td class="px-5 py-3">
                     <input
                       v-model="s.documento"
                       type="text"
                       maxlength="20"
                       inputmode="numeric"
                       :disabled="s.alreadyInSystem"
-                      class="w-32 rounded border border-transparent bg-transparent px-1 py-0.5 font-mono text-xs text-gray-600 outline-none hover:border-gray-200 focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400/20 disabled:cursor-not-allowed disabled:hover:border-transparent"
-                      @input="s.documento = s.documento.replace(/\D/g, '').slice(0, 20)"
+                      class="w-32 rounded-md border border-gray-200 bg-white px-2 py-1 font-mono text-xs text-gray-700 outline-none transition hover:border-gray-300 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/20 disabled:cursor-not-allowed disabled:border-transparent disabled:bg-transparent disabled:text-gray-500"
+                      @input="onExtractedDocumentoInput(s)"
                     />
                   </td>
 
-                  <!-- Tipo documento -->
-                  <td class="px-5 py-3 text-xs font-medium uppercase text-gray-400">
-                    {{ s.tipo_de_documento || "—" }}
+                  <!-- Tipo documento (editable) -->
+                  <td class="px-5 py-3">
+                    <select
+                      v-model="s.tipo_de_documento"
+                      :disabled="s.alreadyInSystem"
+                      class="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium uppercase text-gray-700 outline-none transition hover:border-gray-300 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/20 disabled:cursor-not-allowed disabled:border-transparent disabled:bg-transparent disabled:opacity-60"
+                    >
+                      <option value="">—</option>
+                      <option
+                        v-for="opt in TIPO_DE_DOCUMENTO_OPTIONS"
+                        :key="opt"
+                        :value="opt"
+                      >{{ opt }}</option>
+                    </select>
                   </td>
 
                   <!-- Tipo factura -->
@@ -945,11 +1184,29 @@ onMounted(async () => {
                     <select
                       v-model="s.tipo_de_factura"
                       :disabled="s.alreadyInSystem"
-                      class="rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-gray-700 outline-none hover:border-gray-200 focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      class="rounded-md border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700 outline-none transition hover:border-gray-300 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/20 disabled:cursor-not-allowed disabled:border-transparent disabled:bg-transparent disabled:opacity-60"
                     >
                       <option value="">—</option>
                       <option v-for="opt in TIPO_DE_FACTURA_OPTIONS" :key="opt" :value="opt">{{ opt }}</option>
                     </select>
+                  </td>
+
+                  <!-- Single-image preview -->
+                  <td class="px-3 py-3 text-center">
+                    <button
+                      type="button"
+                      class="rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 disabled:opacity-30"
+                      title="Vista previa (1 imagen)"
+                      :disabled="!s.sourceFile || previewLoading"
+                      @click="openSuplidorPreview(s)"
+                    >
+                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"
+                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"
+                          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    </button>
                   </td>
 
                   <!-- Remove -->
@@ -975,7 +1232,7 @@ onMounted(async () => {
              SECTION 3 — Saved suplidores in DB
         ════════════════════════════════════════════════════ -->
         <section>
-          <div class="mb-3 flex items-center justify-between">
+          <div class="mb-3 flex items-center justify-between gap-3">
             <div>
               <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-400">
                 Suplidores guardados — {{ selectedClient?.name }}
@@ -985,13 +1242,39 @@ onMounted(async () => {
                   {{ registeredDbCount }} de {{ dbSuplidores.length }}
                   {{ dbSuplidores.length === 1 ? "suplidor registrado" : "suplidores registrados" }}
                   en la plataforma.
+                  <template v-if="selectedDbIds.size > 0">
+                    · <span class="font-medium text-gray-700">{{ selectedDbForExport.length }} seleccionados</span>
+                  </template>
                 </template>
                 <template v-else>Sin suplidores guardados aún.</template>
               </p>
             </div>
-            <NuxtLink :to="`/clientes/${selectedClientId}`" class="text-sm font-medium text-emerald-600 hover:underline">
-              Ver cliente →
-            </NuxtLink>
+            <div class="flex flex-shrink-0 items-center gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-emerald-600 px-3.5 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-50"
+                :disabled="exportingDb || selectedDbForExport.length === 0"
+                :title="selectedDbForExport.length === 0 ? 'Selecciona suplidores para exportar' : undefined"
+                @click="exportDbSuplidores"
+              >
+                {{ exportingDb ? "Exportando…" : (selectedDbForExport.length ? `Exportar (${selectedDbForExport.length})` : "Exportar") }}
+              </button>
+              <button
+                type="button"
+                class="rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                :disabled="bulkRegistering || selectedDbForRegister.length === 0"
+                :title="selectedDbForRegister.length === 0 ? 'Selecciona suplidores no registrados' : undefined"
+                @click="bulkRegisterSelected"
+              >
+                {{ bulkRegistering ? "Registrando…" : "Registrar en el sistema" }}
+              </button>
+              <NuxtLink
+                :to="`/clientes/${selectedClientId}`"
+                class="text-sm font-medium text-emerald-600 hover:underline"
+              >
+                Ver cliente →
+              </NuxtLink>
+            </div>
           </div>
 
           <p v-if="dbError" class="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ dbError }}</p>
@@ -1011,6 +1294,15 @@ onMounted(async () => {
             <table class="w-full text-left text-sm">
               <thead class="border-b border-gray-100 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500">
                 <tr>
+                  <th class="w-10 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      :checked="allDbSelected"
+                      :disabled="selectableDb.length === 0"
+                      class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600 disabled:opacity-40"
+                      @change="toggleAllDb"
+                    />
+                  </th>
                   <th class="px-5 py-3">Documento</th>
                   <th class="px-5 py-3">Nombre</th>
                   <th class="px-5 py-3">Tipo de Factura</th>
@@ -1018,7 +1310,21 @@ onMounted(async () => {
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-100">
-                <tr v-for="s in dbSuplidores" :key="s.id" class="hover:bg-gray-50">
+                <tr
+                  v-for="s in dbSuplidores"
+                  :key="s.id"
+                  class="transition"
+                  :class="selectedDbIds.has(s.id) ? 'bg-sky-50/50' : (s.registered_on_platform ? 'bg-emerald-50/20' : 'hover:bg-gray-50')"
+                >
+                  <td class="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      :checked="selectedDbIds.has(s.id)"
+                      class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600"
+                      :title="selectedDbIds.has(s.id) ? 'Incluido en exportar' : 'Marca para incluir'"
+                      @change="toggleDbRow(s.id, ($event.target as HTMLInputElement).checked)"
+                    />
+                  </td>
                   <td class="px-5 py-3 font-mono text-xs text-gray-600">{{ s.documento || "—" }}</td>
                   <td class="px-5 py-3 font-medium text-gray-900">{{ s.nombre }}</td>
                   <td class="px-5 py-3 text-gray-600">{{ s.tipo_de_factura || "—" }}</td>
@@ -1052,11 +1358,11 @@ onMounted(async () => {
 
   <!-- ── Preview modal ──────────────────────────────────────────────────────── -->
   <div
-    v-if="previewUrl"
+    v-if="previewUrl || previewLoading"
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
     @click.self="closePreview"
   >
-    <div class="flex h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+    <div class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
       <div class="flex items-center justify-between border-b border-gray-100 px-5 py-3">
         <p class="truncate text-sm font-medium text-gray-700">{{ previewName }}</p>
         <button type="button" class="rounded-md p-1 text-gray-400 hover:bg-gray-100" @click="closePreview">
@@ -1065,10 +1371,24 @@ onMounted(async () => {
           </svg>
         </button>
       </div>
-      <div class="flex-1 overflow-auto bg-gray-100 p-2">
-        <iframe
+      <div class="flex flex-1 items-center justify-center overflow-auto bg-gray-100 p-3">
+        <div v-if="previewLoading" class="flex items-center gap-2 py-16 text-sm text-gray-400">
+          <svg class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/>
+          </svg>
+          Cargando imagen…
+        </div>
+        <img
+          v-else-if="previewIsImage && previewUrl"
           :src="previewUrl"
-          class="h-full w-full rounded border-0 bg-white"
+          :alt="previewName"
+          class="max-h-[80vh] w-auto max-w-full rounded object-contain shadow-sm"
+        />
+        <iframe
+          v-else-if="previewUrl"
+          :src="previewUrl"
+          class="h-[80vh] w-full rounded border-0 bg-white"
           :title="previewName"
         />
       </div>

@@ -17,11 +17,17 @@ import type {
 import { TIPO_DE_FACTURA_OPTIONS } from "~/composables/useClientSuplidores";
 import type { TaxColumnMapping } from "~/composables/useClientTaxColumnMapping";
 import { TAX_COLUMN_FIELDS } from "~/composables/useClientTaxColumnMapping";
+import {
+  buildSuplidoresExportFilename,
+  downloadSuplidoresCargaMasiva,
+} from "~/utils/suplidoresExport";
 
 const route = useRoute();
 const clientId = computed(() => route.params.id as string);
+const API_BASE = useApiBase();
+const { log: logActivity } = useActivityLog();
 
-const { get: getClient } = useClients();
+const { get: getClient, updateExtractionDocuments } = useClients();
 const { listByClient, create, update, updateAttributeDescription, remove } =
   useClientDocuments();
 const {
@@ -40,10 +46,25 @@ const {
 } = useClientSuplidores();
 const { getByClient: getTaxColumnMapping, upsert: upsertTaxColumnMapping } =
   useClientTaxColumnMapping();
-const { log: logActivity } = useActivityLog();
 
-type Tab = "documentos" | "reglas" | "suplidores" | "impuestos";
-const activeTab = ref<Tab>("documentos");
+type Tab = "documentos" | "reglas" | "suplidores" | "impuestos" | "ajustes";
+const VALID_TABS: Tab[] = [
+  "documentos",
+  "reglas",
+  "suplidores",
+  "impuestos",
+  "ajustes",
+];
+const activeTab = ref<Tab>(
+  (() => {
+    const raw = route.query.tab as string;
+    // Legacy deep-link from before the tab was renamed.
+    const normalized = raw === "extraccion" ? "ajustes" : raw;
+    return VALID_TABS.includes(normalized as Tab)
+      ? (normalized as Tab)
+      : "documentos";
+  })(),
+);
 
 const client = ref<Client | null>(null);
 const documents = ref<ClientDocumentWithAttributes[]>([]);
@@ -121,6 +142,77 @@ const registeredCount = computed(
   () => suplidores.value.filter((s) => s.registered_on_platform).length,
 );
 
+const selectedSuplidorIds = ref<Set<string>>(new Set());
+
+/** Any named suplidor can be selected for export (registered or not). */
+const selectableClientSuplidores = computed(() =>
+  filteredSuplidores.value.filter((s) => s.nombre),
+);
+
+const selectedExportableSuplidores = computed(() =>
+  selectableClientSuplidores.value.filter((s) =>
+    selectedSuplidorIds.value.has(s.id),
+  ),
+);
+
+const allClientSuplidoresSelected = computed(
+  () =>
+    selectableClientSuplidores.value.length > 0 &&
+    selectableClientSuplidores.value.every((s) =>
+      selectedSuplidorIds.value.has(s.id),
+    ),
+);
+
+function toggleAllClientSuplidores() {
+  if (allClientSuplidoresSelected.value) {
+    selectedSuplidorIds.value = new Set();
+    return;
+  }
+  selectedSuplidorIds.value = new Set(
+    selectableClientSuplidores.value.map((s) => s.id),
+  );
+}
+
+function toggleClientSuplidorRow(id: string, checked: boolean) {
+  const next = new Set(selectedSuplidorIds.value);
+  if (checked) next.add(id);
+  else next.delete(id);
+  selectedSuplidorIds.value = next;
+}
+
+const exportingSuplidores = ref(false);
+
+async function exportSuplidores() {
+  const toExport = selectedExportableSuplidores.value;
+  if (!toExport.length) return;
+  exportingSuplidores.value = true;
+  suplidorFormError.value = null;
+  try {
+    await downloadSuplidoresCargaMasiva(
+      API_BASE,
+      toExport.map((s) => ({
+        documento: s.documento,
+        nombre: s.nombre,
+        tipo_de_factura: s.tipo_de_factura,
+      })),
+      buildSuplidoresExportFilename(client.value?.name),
+    );
+    logActivity("suplidores_exported", {
+      clientId: clientId.value,
+      targetLabel: client.value?.name ?? null,
+      metadata: {
+        count: toExport.length,
+        source: "client_detail",
+      },
+    });
+  } catch (err: any) {
+    suplidorFormError.value =
+      err?.message || "No se pudo exportar los suplidores.";
+  } finally {
+    exportingSuplidores.value = false;
+  }
+}
+
 // --- Tax column mapping (Impuestos) state --------------------------------
 const TAX_COLUMN_FIELD_LABELS: Record<
   (typeof TAX_COLUMN_FIELDS)[number],
@@ -136,6 +228,92 @@ const taxMapping = ref<TaxColumnMapping>({});
 const taxMappingSaving = ref(false);
 const taxMappingError = ref<string | null>(null);
 const taxMappingSaved = ref(false);
+
+// --- Extraction document preferences (Ajustes) ---------------------------
+const extractionConceptoDocId = ref("");
+const extractionTipoDePagoDocId = ref("");
+const extractionTipoDeGastoContextDocId = ref("");
+const extractionSaving = ref(false);
+const extractionError = ref<string | null>(null);
+const extractionSaved = ref(false);
+const extractionEditing = ref(false);
+const extractionConfirmOpen = ref(false);
+
+/** Required catalogs already saved on the client. */
+const extractionConfigured = computed(
+  () =>
+    Boolean(
+      client.value?.concepto_document_id &&
+        client.value?.tipo_de_pago_document_id,
+    ),
+);
+
+/** Fields locked when configured and not in edit mode. */
+const extractionFieldsLocked = computed(
+  () => extractionConfigured.value && !extractionEditing.value,
+);
+
+function syncExtractionPrefsFromClient(c: Client | null) {
+  extractionConceptoDocId.value = c?.concepto_document_id ?? "";
+  extractionTipoDePagoDocId.value = c?.tipo_de_pago_document_id ?? "";
+  extractionTipoDeGastoContextDocId.value =
+    c?.tipo_de_gasto_context_document_id ?? "";
+}
+
+function startExtractionEdit() {
+  extractionError.value = null;
+  extractionEditing.value = true;
+}
+
+function cancelExtractionEdit() {
+  syncExtractionPrefsFromClient(client.value);
+  extractionError.value = null;
+  extractionEditing.value = false;
+  extractionConfirmOpen.value = false;
+}
+
+function requestSaveExtractionDocuments() {
+  if (!extractionConceptoDocId.value || !extractionTipoDePagoDocId.value) {
+    extractionError.value =
+      "Selecciona los documentos de Concepto Id y Tipo de Pago Id.";
+    return;
+  }
+  extractionError.value = null;
+  extractionConfirmOpen.value = true;
+}
+
+function cancelExtractionConfirm() {
+  if (extractionSaving.value) return;
+  extractionConfirmOpen.value = false;
+}
+
+async function confirmSaveExtractionDocuments() {
+  extractionSaving.value = true;
+  extractionError.value = null;
+  extractionSaved.value = false;
+  try {
+    const updated = await updateExtractionDocuments(clientId.value, {
+      conceptoDocumentId: extractionConceptoDocId.value || null,
+      tipoDePagoDocumentId: extractionTipoDePagoDocId.value || null,
+      tipoDeGastoContextDocumentId:
+        extractionTipoDeGastoContextDocId.value || null,
+    });
+    client.value = updated;
+    syncExtractionPrefsFromClient(updated);
+    extractionEditing.value = false;
+    extractionConfirmOpen.value = false;
+    extractionSaved.value = true;
+    setTimeout(() => {
+      extractionSaved.value = false;
+    }, 2000);
+  } catch (err: any) {
+    extractionConfirmOpen.value = false;
+    extractionError.value =
+      err?.message || "No se pudo guardar la configuración de extracción.";
+  } finally {
+    extractionSaving.value = false;
+  }
+}
 
 async function saveTaxMapping() {
   taxMappingSaving.value = true;
@@ -171,11 +349,16 @@ async function load() {
       return;
     }
     client.value = found;
+    syncExtractionPrefsFromClient(found);
+    extractionEditing.value = !(
+      found.concepto_document_id && found.tipo_de_pago_document_id
+    );
     documents.value = await listByClient(clientId.value);
     expandedIds.value = new Set(documents.value.map((d) => d.id));
     businessRules.value = await listRulesByClient(clientId.value);
     ruleExpandedIds.value = new Set(businessRules.value.map((r) => r.id));
     suplidores.value = await listSuplidoresByClient(clientId.value);
+    selectedSuplidorIds.value = new Set();
     taxMapping.value = await getTaxColumnMapping(clientId.value);
   } catch (err: any) {
     error.value = err?.message || "No se pudo cargar el cliente.";
@@ -266,6 +449,29 @@ async function onDelete(doc: ClientDocumentWithAttributes) {
   try {
     await remove(doc.id);
     documents.value = documents.value.filter((d) => d.id !== doc.id);
+    if (extractionConceptoDocId.value === doc.id) {
+      extractionConceptoDocId.value = "";
+    }
+    if (extractionTipoDePagoDocId.value === doc.id) {
+      extractionTipoDePagoDocId.value = "";
+    }
+    if (extractionTipoDeGastoContextDocId.value === doc.id) {
+      extractionTipoDeGastoContextDocId.value = "";
+    }
+    if (client.value) {
+      if (client.value.concepto_document_id === doc.id) {
+        client.value = { ...client.value, concepto_document_id: null };
+      }
+      if (client.value.tipo_de_pago_document_id === doc.id) {
+        client.value = { ...client.value, tipo_de_pago_document_id: null };
+      }
+      if (client.value.tipo_de_gasto_context_document_id === doc.id) {
+        client.value = {
+          ...client.value,
+          tipo_de_gasto_context_document_id: null,
+        };
+      }
+    }
     logActivity("document_removed", {
       clientId: clientId.value,
       targetLabel: client.value?.name ?? null,
@@ -554,6 +760,9 @@ async function onDeleteSuplidor(s: ClientSuplidor) {
   try {
     await removeSuplidor(s.id);
     suplidores.value = suplidores.value.filter((x) => x.id !== s.id);
+    const next = new Set(selectedSuplidorIds.value);
+    next.delete(s.id);
+    selectedSuplidorIds.value = next;
     logActivity("suplidor_removed", {
       clientId: clientId.value,
       targetLabel: client.value?.name ?? null,
@@ -792,6 +1001,22 @@ onMounted(load);
               class="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-emerald-600"
             />
           </button>
+          <button
+            type="button"
+            class="relative ml-5 px-1 pb-3 text-sm font-semibold transition"
+            :class="
+              activeTab === 'ajustes'
+                ? 'text-gray-900'
+                : 'text-gray-400 hover:text-gray-600'
+            "
+            @click="activeTab = 'ajustes'"
+          >
+            Ajustes
+            <span
+              v-if="activeTab === 'ajustes'"
+              class="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-emerald-600"
+            />
+          </button>
         </div>
 
         <section v-if="activeTab === 'documentos'">
@@ -1023,6 +1248,182 @@ onMounted(load);
                 </table>
               </div>
             </article>
+          </div>
+        </section>
+
+        <!-- ===== Ajustes tab ===== -->
+        <section v-else-if="activeTab === 'ajustes'">
+          <div class="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h2
+                class="text-sm font-semibold uppercase tracking-wide text-gray-400"
+              >
+                Documentos para extracción
+              </h2>
+              <p class="mt-1 text-sm text-gray-500">
+                Elige qué documentos de ERP alimentan Concepto Id, Tipo de Pago
+                Id y el contexto de Tipo de Gasto. Esta configuración se
+                reutiliza en cada extracción; no hace falta elegirla cada vez.
+              </p>
+            </div>
+            <button
+              v-if="extractionFieldsLocked"
+              type="button"
+              class="flex-shrink-0 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+              @click="startExtractionEdit"
+            >
+              Editar
+            </button>
+          </div>
+
+          <div
+            v-if="documents.length === 0"
+            class="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-10 text-center"
+          >
+            <p class="text-sm font-medium text-gray-700">
+              Sin documentos todavía
+            </p>
+            <p class="mt-1 text-sm text-gray-500">
+              Crea al menos un documento en la pestaña Documentos antes de
+              configurar la extracción.
+            </p>
+            <button
+              type="button"
+              class="mt-4 text-sm font-medium text-emerald-700 hover:underline"
+              @click="activeTab = 'documentos'"
+            >
+              Ir a Documentos
+            </button>
+          </div>
+
+          <div
+            v-else
+            class="max-w-lg space-y-4 rounded-xl border border-gray-200 bg-white p-5"
+          >
+            <div>
+              <label
+                for="extraction-concepto-doc"
+                class="mb-1.5 block text-sm font-medium text-gray-700"
+              >
+                Documento para Concepto Id
+                <span class="text-rose-500">*</span>
+              </label>
+              <select
+                id="extraction-concepto-doc"
+                v-model="extractionConceptoDocId"
+                :disabled="extractionFieldsLocked"
+                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500"
+              >
+                <option value="">Selecciona un documento</option>
+                <option
+                  v-for="doc in documents"
+                  :key="doc.id"
+                  :value="doc.id"
+                >
+                  {{ doc.document_name }} ({{ doc.document_attributes.length }}
+                  atributos)
+                </option>
+              </select>
+            </div>
+
+            <div>
+              <label
+                for="extraction-tipo-pago-doc"
+                class="mb-1.5 block text-sm font-medium text-gray-700"
+              >
+                Documento para Tipo de Pago Id
+                <span class="text-rose-500">*</span>
+              </label>
+              <select
+                id="extraction-tipo-pago-doc"
+                v-model="extractionTipoDePagoDocId"
+                :disabled="extractionFieldsLocked"
+                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500"
+              >
+                <option value="">Selecciona un documento</option>
+                <option
+                  v-for="doc in documents"
+                  :key="doc.id"
+                  :value="doc.id"
+                >
+                  {{ doc.document_name }} ({{ doc.document_attributes.length }}
+                  atributos)
+                </option>
+              </select>
+            </div>
+
+            <div class="border-t border-gray-100 pt-4">
+              <label
+                for="extraction-tipo-gasto-doc"
+                class="mb-1.5 block text-sm font-medium text-gray-700"
+              >
+                Documento de contexto para Tipo de Gasto
+                <span class="font-normal text-gray-400">(opcional)</span>
+              </label>
+              <select
+                id="extraction-tipo-gasto-doc"
+                v-model="extractionTipoDeGastoContextDocId"
+                :disabled="extractionFieldsLocked"
+                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500"
+              >
+                <option value="">Sin contexto adicional</option>
+                <option
+                  v-for="doc in documents"
+                  :key="doc.id"
+                  :value="doc.id"
+                >
+                  {{ doc.document_name }} ({{ doc.document_attributes.length }}
+                  atributos)
+                </option>
+              </select>
+              <p class="mt-1.5 text-xs text-gray-400">
+                El "Tipo de Gasto" siempre se elige entre las 11 opciones fijas
+                de la app. Si seleccionas un documento aquí, sus atributos y
+                comentario se envían a la IA solo como contexto.
+              </p>
+            </div>
+
+            <p
+              v-if="extractionError"
+              class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+            >
+              {{ extractionError }}
+            </p>
+
+            <div
+              v-if="!extractionFieldsLocked"
+              class="flex items-center gap-3 border-t border-gray-100 pt-4"
+            >
+              <button
+                type="button"
+                :disabled="extractionSaving"
+                class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                @click="requestSaveExtractionDocuments"
+              >
+                Guardar
+              </button>
+              <button
+                v-if="extractionConfigured"
+                type="button"
+                :disabled="extractionSaving"
+                class="rounded-lg px-3.5 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100 disabled:opacity-60"
+                @click="cancelExtractionEdit"
+              >
+                Cancelar
+              </button>
+              <span
+                v-if="extractionSaved"
+                class="text-sm font-medium text-emerald-600"
+              >
+                Guardado
+              </span>
+            </div>
+            <div
+              v-else-if="extractionSaved"
+              class="border-t border-gray-100 pt-4"
+            >
+              <span class="text-sm font-medium text-emerald-600">Guardado</span>
+            </div>
           </div>
         </section>
 
@@ -1268,10 +1669,17 @@ onMounted(load);
               </h2>
               <p class="mt-0.5 text-sm text-gray-500">
                 Proveedores registrados para este cliente.
+                Marca los que quieras exportar.
                 <span v-if="suplidores.length > 0" class="ml-1">
                   {{ registeredCount }} de {{ suplidores.length }} agregados en
                   el sistema.
                 </span>
+                <template v-if="selectedExportableSuplidores.length > 0">
+                  ·
+                  <span class="font-medium text-gray-700"
+                    >{{ selectedExportableSuplidores.length }} seleccionados</span
+                  >
+                </template>
               </p>
             </div>
             <span class="text-sm text-gray-400">
@@ -1333,8 +1741,8 @@ onMounted(load);
           </div>
 
           <template v-else>
-            <div class="mb-3">
-              <div class="relative">
+            <div class="mb-3 flex flex-wrap items-center gap-3">
+              <div class="relative min-w-0 flex-1">
                 <svg
                   class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
                   fill="none"
@@ -1355,6 +1763,21 @@ onMounted(load);
                   class="w-full max-w-sm rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 placeholder-gray-400 outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40"
                 />
               </div>
+              <button
+                type="button"
+                class="flex-shrink-0 rounded-lg border border-emerald-600 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-50"
+                :disabled="exportingSuplidores || selectedExportableSuplidores.length === 0"
+                :title="selectedExportableSuplidores.length === 0 ? 'Selecciona suplidores para exportar' : undefined"
+                @click="exportSuplidores"
+              >
+                {{
+                  exportingSuplidores
+                    ? "Exportando…"
+                    : selectedExportableSuplidores.length
+                      ? `Exportar (${selectedExportableSuplidores.length})`
+                      : "Exportar"
+                }}
+              </button>
             </div>
 
             <div
@@ -1374,6 +1797,15 @@ onMounted(load);
                   class="sticky top-0 border-b border-gray-100 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500"
                 >
                   <tr>
+                    <th class="w-10 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        :checked="allClientSuplidoresSelected"
+                        :disabled="selectableClientSuplidores.length === 0"
+                        class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600 disabled:opacity-40"
+                        @change="toggleAllClientSuplidores"
+                      />
+                    </th>
                     <th class="px-5 py-3">Documento</th>
                     <th class="px-5 py-3">Nombre</th>
                     <th class="px-5 py-3">Tipo de Factura</th>
@@ -1387,8 +1819,33 @@ onMounted(load);
                   <tr
                     v-for="s in filteredSuplidores"
                     :key="s.id"
-                    class="group hover:bg-gray-50"
+                    class="group transition"
+                    :class="
+                      selectedSuplidorIds.has(s.id)
+                        ? 'bg-sky-50/50'
+                        : s.registered_on_platform
+                          ? 'bg-emerald-50/20'
+                          : 'hover:bg-gray-50'
+                    "
                   >
+                    <td class="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        :checked="selectedSuplidorIds.has(s.id)"
+                        class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600"
+                        :title="
+                          selectedSuplidorIds.has(s.id)
+                            ? 'Incluido en exportar'
+                            : 'Marca para incluir'
+                        "
+                        @change="
+                          toggleClientSuplidorRow(
+                            s.id,
+                            ($event.target as HTMLInputElement).checked,
+                          )
+                        "
+                      />
+                    </td>
                     <td class="px-5 py-3 font-mono text-xs text-gray-600">
                       {{ s.documento || "—" }}
                     </td>
@@ -1950,6 +2407,51 @@ onMounted(load);
             {{ ruleCommentSaving ? "Guardando…" : "Guardar contexto" }}
           </button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm save extraction settings -->
+  <div
+    v-if="extractionConfirmOpen"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="extraction-confirm-title"
+  >
+    <div
+      class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl"
+    >
+      <h2
+        id="extraction-confirm-title"
+        class="text-lg font-semibold text-gray-900"
+      >
+        ¿Guardar ajustes de extracción?
+      </h2>
+      <p class="mt-2 text-sm text-slate-600">
+        Estos documentos se usarán en todas las extracciones de
+        <strong class="font-semibold text-gray-800">{{
+          client?.name || "este cliente"
+        }}</strong
+        >. Confirma que la selección es correcta.
+      </p>
+      <div class="mt-6 flex justify-end gap-3">
+        <button
+          type="button"
+          class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+          :disabled="extractionSaving"
+          @click="cancelExtractionConfirm"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+          :disabled="extractionSaving"
+          @click="confirmSaveExtractionDocuments"
+        >
+          {{ extractionSaving ? "Guardando…" : "Confirmar y guardar" }}
+        </button>
       </div>
     </div>
   </div>

@@ -39,8 +39,16 @@ file_size_limit = "50MiB"
 
 [auth]
 enabled = true
+# Default redirect target when redirectTo is omitted. For hosted projects,
+# set Site URL to your production origin in Authentication → URL Configuration,
+# and keep localhost in Additional Redirect URLs so local + deploy both work.
+# Example production allowlist entries:
+#   https://caobo-automationz-ui-production.up.railway.app
+#   https://caobo-automationz-ui-production.up.railway.app/auth/callback
+#   https://caobo-automationz-ui-production.up.railway.app/auth/reset-password
 site_url = "http://localhost:3000"
 additional_redirect_urls = [
+  "http://localhost:3000/**",
   "http://localhost:3000/auth/callback",
   "http://localhost:3000/auth/reset-password",
 ]
@@ -52,6 +60,10 @@ enable_anonymous_sign_ins = false
 enable_signup = true
 double_confirm_changes = true
 enable_confirmations = false
+# Also governs invite / magic-link / recovery link lifetime (default 1h).
+# Mirror this value in SUPABASE_INVITE_EXPIRY_SECONDS so the Equipo UI
+# marks invitations as expired at the same time Auth rejects the link.
+otp_expiry = 3600
 
 [auth.sms]
 enable_signup = false

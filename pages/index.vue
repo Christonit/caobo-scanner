@@ -391,6 +391,64 @@
           </p>
           <div class="flex flex-wrap items-center gap-2">
             <button
+              v-if="selectedCount > 1"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-sm font-semibold text-purple-700 transition hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-40"
+              :disabled="
+                processing ||
+                individualLimit.isLimited.value ||
+                !canScan ||
+                !selectedReanalyzableCount
+              "
+              :title="
+                !canScan
+                  ? 'Selecciona un cliente y sus documentos de ERP'
+                  : individualLimit.isLimited.value
+                    ? `Límite alcanzado - espera ${individualLimit.label.value}`
+                    : !selectedReanalyzableCount
+                      ? 'Ninguna fila seleccionada se puede reanalizar ahora'
+                      : 'Reanalizar filas seleccionadas'
+              "
+              @click="reanalyzeSelectedFiles"
+            >
+              <svg
+                class="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              Reanalizar
+            </button>
+            <button
+              v-if="selectedCount > 1"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50"
+              title="Eliminar filas seleccionadas"
+              @click="removeSelectedFiles"
+            >
+              <svg
+                class="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+              Eliminar
+            </button>
+            <button
               v-if="tableView === 'active'"
               type="button"
               class="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-800"
@@ -513,7 +571,7 @@
                 <!-- Documento -->
                 <td
                   v-if="showFullTableColumns"
-                  class="px-2 py-2.5 w-32 sticky left-20 bg-white z-[25]"
+                  :class="`px-2 py-2.5 w-32 sticky left-20  hover:bg-slate-100 z-[25] ${isSelected(file.id) ? 'bg-slate-100' : 'bg-white'}`"
                 >
                   <input
                     type="text"
@@ -525,7 +583,7 @@
                         $event.target.value || '',
                       ).replace(/\D/g, '')
                     "
-                    class="w-28 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                    class="w-28 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-slate-600 transition-colors hover:border-slate-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
                     :class="{
                       [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'documento'),
                     }"
@@ -561,7 +619,7 @@
                 <!-- Score -->
                 <td
                   v-if="showFullTableColumns"
-                  class="px-2 py-2.5 text-center sticky left-[188px] bg-white"
+                  :class="`px-2 py-2.5 text-center sticky z-[5] left-[188px] ${isSelected(file.id) ? 'bg-slate-100' : 'bg-white'}`"
                 >
                   <span
                     v-if="file.score > 0"
@@ -596,6 +654,7 @@
                     <input
                       type="text"
                       v-model="file.editableData.ncf"
+                      :data-ncf-file-id="file.id"
                       @focus="startEditing(file)"
                       @blur="
                         file.editableData.ncf = normalizeNcf(
@@ -605,14 +664,31 @@
                       class="w-32 rounded border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-slate-600 transition-colors hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
                       :class="{
                         [DUDOSO_FIELD_CLASSES]: isFieldDudoso(file, 'ncf'),
+                        [NCF_LENGTH_WARNING_CLASSES]: isNcfLengthHighlighted(
+                          file.id,
+                        ),
                       }"
-                      :title="getDudosoReason(file, 'ncf')"
+                      :title="
+                        getDudosoReason(file, 'ncf') ||
+                        (isInvalidNcfLength(file.editableData.ncf)
+                          ? ncfLengthHint(file.editableData.ncf)
+                          : undefined)
+                      "
                       placeholder="-"
                     />
 
                     <span
-                      class="bg-slate-100 rounded-full p-1 inline-block font-medium leading-none w-6 h-6 border-slate-200 border box-border text-xs text-slate-500"
-                      title="Total de caracteres del NCF"
+                      class="rounded-full p-1 inline-block font-medium leading-none w-6 h-6 border box-border text-xs"
+                      :class="
+                        isInvalidNcfLength(file.editableData.ncf)
+                          ? 'bg-amber-100 border-amber-300 text-amber-700'
+                          : 'bg-slate-100 border-slate-200 text-slate-500'
+                      "
+                      :title="
+                        isInvalidNcfLength(file.editableData.ncf)
+                          ? ncfLengthHint(file.editableData.ncf)
+                          : 'Total de caracteres del NCF'
+                      "
                     >
                       {{ file.editableData.ncf.length }}
                     </span>
@@ -1235,6 +1311,33 @@
             </svg>
             {{ files.length }} entradas escaneadas
           </div>
+          <div
+            v-if="needsHumanInputCount > 0"
+            class="flex items-center justify-between gap-2 border-t border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900"
+            title="Filas con baja confianza, error, o marcadas para revisar"
+          >
+            <span class="flex items-center gap-2">
+              <svg
+                class="h-4 w-4 flex-shrink-0 text-amber-500"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.8"
+                  d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+                />
+              </svg>
+              Requieren revisión
+            </span>
+            <span
+              class="inline-flex min-w-[1.5rem] items-center justify-center rounded-full bg-amber-200/80 px-2 py-0.5 text-xs font-bold tabular-nums text-amber-900"
+            >
+              {{ needsHumanInputCount }}
+            </span>
+          </div>
         </div>
 
         <!-- Multipage breakdown -->
@@ -1288,7 +1391,7 @@
         <div class="space-y-2 rounded-xl border border-gray-200 bg-white p-3">
           <button
             v-if="baseExportableFilesCount > 0"
-            @click="openSuplidorSummary"
+            @click="requestExport"
             class="w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             :disabled="exportableFilesCount === 0"
             :title="
@@ -1610,21 +1713,6 @@
         class="flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-3"
       >
         <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-1.5">
-            <svg
-              class="h-3.5 w-3.5 flex-shrink-0 text-emerald-600"
-              fill="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
-            </svg>
-            <p
-              class="text-[11px] font-medium uppercase tracking-wide text-emerald-700"
-            >
-              Fijada
-            </p>
-          </div>
           <h3
             class="truncate text-sm font-semibold text-gray-900"
             :title="previewFile.name"
@@ -1773,6 +1861,62 @@
             />
           </svg>
         </button>
+        <div
+          class="mx-1 h-4 w-px flex-shrink-0 bg-gray-200"
+          aria-hidden="true"
+        />
+        <button
+          type="button"
+          class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"
+          title="Rotar 90° a la izquierda"
+          @click="rotatePreview(-1)"
+        >
+          <svg
+            class="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M3 12a9 9 0 109-9"
+            />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M3 4v5h5"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"
+          title="Rotar 90° a la derecha"
+          @click="rotatePreview(1)"
+        >
+          <svg
+            class="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M21 12a9 9 0 11-9-9"
+            />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M21 4v5h-5"
+            />
+          </svg>
+        </button>
         <p class="ml-auto truncate text-[11px] text-gray-400">
           Clic en una fila para cambiar imagen
         </p>
@@ -1804,7 +1948,7 @@
             class="pointer-events-none absolute left-1/2 top-1/2 max-h-full max-w-full select-none object-contain"
             draggable="false"
             :style="{
-              transform: `translate(calc(-50% + ${previewPanX}px), calc(-50% + ${previewPanY}px)) scale(${previewZoom})`,
+              transform: `translate(calc(-50% + ${previewPanX}px), calc(-50% + ${previewPanY}px)) scale(${previewZoom}) rotate(${previewRotation}deg)`,
               transformOrigin: 'center center',
             }"
             @load="onPreviewImageLoad"
@@ -1849,6 +1993,58 @@
       </div>
     </aside>
   </Transition>
+
+  <!-- NCF length warning before export -->
+  <div
+    v-if="ncfLengthWarningOpen"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="ncf-length-warning-title"
+  >
+    <div
+      class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl"
+    >
+      <h2
+        id="ncf-length-warning-title"
+        class="text-lg font-semibold text-gray-900"
+      >
+        NCF con longitud incorrecta
+      </h2>
+      <p class="mt-2 text-sm text-slate-600">
+        Hay
+        <strong class="font-semibold text-gray-800">{{
+          invalidNcfFileIds.size
+        }}</strong>
+        {{
+          invalidNcfFileIds.size === 1
+            ? "NCF que no tiene"
+            : "NCF que no tienen"
+        }}
+        la longitud requerida:
+        <strong class="font-semibold text-gray-800">13</strong>
+        caracteres si empieza con E,
+        <strong class="font-semibold text-gray-800">11</strong>
+        si empieza con B. Los campos afectados están resaltados en la tabla.
+      </p>
+      <div class="mt-6 flex justify-end gap-3">
+        <button
+          type="button"
+          class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+          @click="cancelNcfLengthWarning"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          class="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700"
+          @click="exportDespiteNcfWarning"
+        >
+          Exportar de todos modos
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Leave confirmation: scan progress is not persisted -->
   <div
@@ -2680,6 +2876,35 @@ const normalizeNcf = (value) => {
     .toUpperCase();
 };
 
+/** Expected NCF length: E → 13, B → 11. Other prefixes are not length-checked. */
+const expectedNcfLength = (ncf) => {
+  const value = normalizeNcf(ncf);
+  if (!value) return null;
+  if (value.startsWith("E")) return 13;
+  if (value.startsWith("B")) return 11;
+  return null;
+};
+
+/** Non-empty NCF with wrong length for its series (empty allowed for gasto informal). */
+const isInvalidNcfLength = (ncf) => {
+  const value = normalizeNcf(ncf);
+  if (!value) return false;
+  const expected = expectedNcfLength(value);
+  if (expected == null) return false;
+  return value.length !== expected;
+};
+
+const ncfLengthHint = (ncf) => {
+  const expected = expectedNcfLength(ncf);
+  if (!expected) return "Total de caracteres del NCF";
+  const series = normalizeNcf(ncf).startsWith("E")
+    ? " (serie E)"
+    : normalizeNcf(ncf).startsWith("B")
+      ? " (serie B)"
+      : "";
+  return `Longitud requerida: ${expected} caracteres${series}`;
+};
+
 /**
  * Remove typed nomenclature prefixes from the start of a value for Excel
  * export. Also drops OCR leading zeros that pad the prefix. Characters
@@ -3249,6 +3474,7 @@ const previewUrl = ref(null);
 const previewZoom = ref(1);
 const previewPanX = ref(0);
 const previewPanY = ref(0);
+const previewRotation = ref(0);
 const previewMagnifierActive = ref(true);
 const magnifierZoom = ref(2.5);
 const magnifierVisible = ref(false);
@@ -3307,6 +3533,19 @@ const baseExportableFilesCount = computed(
 );
 const exportableFilesCount = computed(() => getExportableFiles().length);
 
+/** Row needs a human look: low AI confidence, failed scan, or deferred. */
+const needsHumanInput = (file) => {
+  if (!file) return false;
+  if (file.reviewLater) return true;
+  if (file.status === "error" || file.status === "needs_retry") return true;
+  if (file.status === "done" && file.score > 0 && file.score < 3) return true;
+  return false;
+};
+
+const needsHumanInputCount = computed(
+  () => files.value.filter((f) => needsHumanInput(f)).length,
+);
+
 const matchesSearch = (f, q) => {
   if (!q) return true;
   const d = f.editableData;
@@ -3336,6 +3575,17 @@ const filteredFiles = computed(() => {
 });
 
 const selectedCount = computed(() => selectedFileIds.value.size);
+
+const selectedReanalyzableCount = computed(
+  () =>
+    files.value.filter(
+      (f) =>
+        selectedFileIds.value.has(f.id) &&
+        f.status !== "processing" &&
+        f.status !== "retrying" &&
+        f.status !== "pending",
+    ).length,
+);
 
 const allVisibleSelected = computed(() => {
   const visible = filteredFiles.value;
@@ -3437,6 +3687,74 @@ const restoreSelectedFromLater = () => {
   });
   clearSelection();
   tableView.value = "active";
+};
+
+const removeSelectedFiles = () => {
+  const ids = selectedFileIds.value;
+  if (!ids.size) return;
+
+  const toRemove = files.value.filter((f) => ids.has(f.id));
+  if (!toRemove.length) return;
+
+  if (toRemove.some((f) => previewFile.value?.id === f.id)) {
+    closePreview();
+  }
+  if (toRemove.some((f) => descripcionEditorFile.value?.id === f.id)) {
+    closeDescripcionEditor();
+  }
+
+  const sourceIds = new Set();
+  toRemove.forEach((f) => {
+    revokeFileObjectUrl(f);
+    if (f.sourceId != null) sourceIds.add(f.sourceId);
+  });
+
+  files.value = files.value.filter((f) => !ids.has(f.id));
+  sourceIds.forEach(syncSourceDocumentAfterFileRemoval);
+  clearSelection();
+
+  if (files.value.length === 0) {
+    totalProcessingTime.value = 0;
+    tableView.value = "active";
+    if (fileInput.value) {
+      fileInput.value.value = "";
+    }
+  }
+};
+
+const reanalyzeSelectedFiles = async () => {
+  if (!canScan.value) {
+    alert("Selecciona un cliente y sus documentos de ERP antes de procesar.");
+    return;
+  }
+  if (processing.value) return;
+
+  const selected = files.value.filter(
+    (f) =>
+      selectedFileIds.value.has(f.id) &&
+      f.status !== "processing" &&
+      f.status !== "retrying" &&
+      f.status !== "pending",
+  );
+  if (!selected.length) return;
+
+  clearSelection();
+
+  if (!extractionSessionId.value) {
+    beginExtractionSession();
+  }
+
+  for (const file of selected) {
+    if (individualLimit.isLimited.value) {
+      alert(
+        `Límite de evaluación individual alcanzado ` +
+          `(${INDIVIDUAL_RPM} solicitudes / minuto). ` +
+          `Reintenta en ${individualLimit.label.value}.`,
+      );
+      break;
+    }
+    await runSingleFileEvaluation(file);
+  }
 };
 
 // Clear selection when switching tabs so bulk actions stay scoped.
@@ -3698,6 +4016,16 @@ const resetPreviewTransform = () => {
   previewPanY.value = 0;
 };
 
+const resetPreviewRotation = () => {
+  previewRotation.value = 0;
+};
+
+/** Rotate preview by quarter-turns (−1 = 90° CCW, +1 = 90° CW). */
+const rotatePreview = (quarterTurns) => {
+  previewRotation.value =
+    (((previewRotation.value + quarterTurns * 90) % 360) + 360) % 360;
+};
+
 const resetMagnifierZoom = () => {
   magnifierZoom.value = MAGNIFIER_ZOOM_DEFAULT;
 };
@@ -3737,11 +4065,14 @@ const magnifierImageStyle = computed(() => {
   const z = magnifierZoom.value;
   const w = magnifierImgW.value * z;
   const h = magnifierImgH.value * z;
+  const rot = previewRotation.value;
   return {
     width: `${w}px`,
     height: `${h}px`,
     left: `${MAGNIFIER_SIZE / 2 - magnifierRelX.value * w}px`,
     top: `${MAGNIFIER_SIZE / 2 - magnifierRelY.value * h}px`,
+    transform: rot ? `rotate(${rot}deg)` : undefined,
+    transformOrigin: `${magnifierRelX.value * 100}% ${magnifierRelY.value * 100}%`,
   };
 });
 
@@ -3753,27 +4084,43 @@ const onPreviewMagnifierMove = (event) => {
 
   const containerRect = container.getBoundingClientRect();
   const imgRect = img.getBoundingClientRect();
+  const layoutW = img.offsetWidth;
+  const layoutH = img.offsetHeight;
 
   magnifierX.value = event.clientX - containerRect.left;
   magnifierY.value = event.clientY - containerRect.top;
 
   if (
+    layoutW <= 0 ||
+    layoutH <= 0 ||
     imgRect.width <= 0 ||
-    imgRect.height <= 0 ||
-    event.clientX < imgRect.left ||
-    event.clientX > imgRect.right ||
-    event.clientY < imgRect.top ||
-    event.clientY > imgRect.bottom
+    imgRect.height <= 0
   ) {
     magnifierVisible.value = false;
     return;
   }
 
+  // Map cursor into unrotated image space (undo CSS rotate around center).
+  const cx = imgRect.left + imgRect.width / 2;
+  const cy = imgRect.top + imgRect.height / 2;
+  const dx = event.clientX - cx;
+  const dy = event.clientY - cy;
+  const rad = (-previewRotation.value * Math.PI) / 180;
+  const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+  const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+  const scaledW = layoutW * previewZoom.value;
+  const scaledH = layoutH * previewZoom.value;
+
+  if (Math.abs(localX) > scaledW / 2 || Math.abs(localY) > scaledH / 2) {
+    magnifierVisible.value = false;
+    return;
+  }
+
   magnifierVisible.value = true;
-  magnifierImgW.value = imgRect.width;
-  magnifierImgH.value = imgRect.height;
-  magnifierRelX.value = (event.clientX - imgRect.left) / imgRect.width;
-  magnifierRelY.value = (event.clientY - imgRect.top) / imgRect.height;
+  magnifierImgW.value = scaledW;
+  magnifierImgH.value = scaledH;
+  magnifierRelX.value = (localX + scaledW / 2) / scaledW;
+  magnifierRelY.value = (localY + scaledH / 2) / scaledH;
 };
 
 const onPreviewMagnifierLeave = () => {
@@ -4220,6 +4567,7 @@ const openPreview = (file) => {
   previewFile.value = file;
   if (switching) {
     resetPreviewTransform();
+    resetPreviewRotation();
     magnifierVisible.value = false;
   }
 
@@ -4277,6 +4625,7 @@ const closePreview = () => {
   magnifierVisible.value = false;
   resetMagnifierZoom();
   resetPreviewTransform();
+  resetPreviewRotation();
   onPreviewPanEnd();
 };
 
@@ -4348,6 +4697,11 @@ const getScoreReasonSummary = (file) => {
 // Shared classes for the yellow "needs manual validation" highlight.
 const DUDOSO_FIELD_CLASSES =
   "bg-amber-100 ring-1 ring-amber-400 focus:ring-amber-400";
+
+// Highlight when export is blocked by NCF length (rose so it stands apart
+// from the amber "dudoso" OCR flag).
+const NCF_LENGTH_WARNING_CLASSES =
+  "bg-rose-50 ring-2 ring-rose-400 focus:border-rose-500 focus:ring-rose-400";
 
 const formatTime = (milliseconds) => {
   if (milliseconds < 1000) {
@@ -4590,6 +4944,69 @@ const suplidorSummaryRows = ref([]);
 const suplidorSummaryTogglingId = ref(null);
 const suplidorSaveError = ref(null);
 const suplidorSaving = ref(false);
+
+const ncfLengthWarningOpen = ref(false);
+const invalidNcfFileIds = ref(new Set());
+
+const isNcfLengthHighlighted = (fileId) => {
+  if (!invalidNcfFileIds.value.has(fileId)) return false;
+  const file = files.value.find((f) => f.id === fileId);
+  return file ? isInvalidNcfLength(file.editableData?.ncf) : false;
+};
+
+const getInvalidNcfExportFiles = () =>
+  getExportableFiles().filter((f) => isInvalidNcfLength(f.editableData?.ncf));
+
+async function focusInvalidNcfInputs() {
+  tableView.value = "active";
+  search.value = "";
+  await nextTick();
+  const ids = [...invalidNcfFileIds.value];
+  if (!ids.length) return;
+  const first = document.querySelector(
+    `[data-ncf-file-id="${CSS.escape(String(ids[0]))}"]`,
+  );
+  if (first instanceof HTMLElement) {
+    first.scrollIntoView({ behavior: "smooth", block: "center" });
+    first.focus();
+  }
+}
+
+async function requestExport() {
+  const invalid = getInvalidNcfExportFiles();
+  if (invalid.length) {
+    invalidNcfFileIds.value = new Set(invalid.map((f) => f.id));
+    // Make invalid rows visible under the modal; focus after Cancelar.
+    tableView.value = "active";
+    search.value = "";
+    ncfLengthWarningOpen.value = true;
+    await nextTick();
+    const firstId = invalid[0]?.id;
+    const el = firstId
+      ? document.querySelector(
+          `[data-ncf-file-id="${CSS.escape(String(firstId))}"]`,
+        )
+      : null;
+    if (el instanceof HTMLElement) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    return;
+  }
+  invalidNcfFileIds.value = new Set();
+  await openSuplidorSummary();
+}
+
+async function cancelNcfLengthWarning() {
+  ncfLengthWarningOpen.value = false;
+  // Keep highlights so the user can still see which NCF to fix.
+  await focusInvalidNcfInputs();
+}
+
+async function exportDespiteNcfWarning() {
+  ncfLengthWarningOpen.value = false;
+  invalidNcfFileIds.value = new Set();
+  await openSuplidorSummary();
+}
 
 async function buildSuplidorSummary() {
   if (!selectedClientId.value) return [];

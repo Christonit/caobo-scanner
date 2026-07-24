@@ -286,9 +286,8 @@ def fill_gastos_xls_template(
     `rows` must already be normalized (see server.prepare_export_row). Text
     fields are written as LABELSST string cells, numeric fields as number
     cells, integer id fields only when present, and date fields (values must
-    be 'DD/MM/YYYY' strings) as real Excel date serials - the destination CRM
-    validates the Fecha column as an actual date type, not free text, and the
-    template's own column formatting (e.g. 'm/d/yy') confirms this.
+    be 'DD/MM/YYYY' strings) as real Excel date serials when requested.
+    Fecha is exported as text by default.
     """
     template_path = Path(template_path)
     out_path = Path(out_path)

@@ -1157,7 +1157,7 @@ GASTOS_EXCEL_FIELD_MAPPINGS = {
 
 GASTOS_EXCEL_TEXT_FIELDS = [
     "nombre", "documento", "ncf", "ncf_afectado", "tipo_de_suplidor", "tipo_de_gasto",
-    "descripcion", "moneda", "metodo_de_pago",
+    "descripcion", "fecha", "moneda", "metodo_de_pago",
 ]
 GASTOS_EXCEL_NUMERIC_FIELDS = [
     "monto_en_servicios", "monto_en_bienes",
@@ -1209,10 +1209,8 @@ def resolve_gastos_tax_columns(row: dict, tax_column_mapping: Optional[dict]) ->
         if slot:
             slots[f"impuesto_{slot}"] = _num(row.get(field))
     return slots
-# The template's Fecha column is formatted as a real Excel date (not text);
-# the destination CRM validates it as a date type, so it must be written as
-# an actual date serial, not a "DD/MM/YYYY" string.
-GASTOS_EXCEL_DATE_FIELDS = ["fecha"]
+# Fecha is exported as plain text (DD/MM/YYYY), not an Excel date serial.
+GASTOS_EXCEL_DATE_FIELDS: list[str] = []
 
 def _normalize_gastos_extracted(
     extracted: dict,

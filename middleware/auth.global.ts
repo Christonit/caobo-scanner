@@ -36,6 +36,11 @@ const FEATURE_GATED_ROUTES: Record<string, FeatureFlag> = {
   "/team": "team",
 };
 
+// Routes reserved for org admins (superadmins included). Collaborators are
+// redirected to /. The matching API routes enforce this server-side too — this
+// only avoids rendering a page the caller can't populate.
+const ADMIN_ONLY_ROUTES = new Set(["/leaderboard"]);
+
 export default defineNuxtRouteMiddleware(async (to) => {
   const features = useFeatureFlags();
 
@@ -69,7 +74,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const supabase = useSupabaseClient<Database>();
   const { data, error } = await supabase
     .from("user_profiles")
-    .select("organization_id")
+    .select("organization_id, role")
     .eq("id", userId)
     .maybeSingle();
 
@@ -77,7 +82,12 @@ export default defineNuxtRouteMiddleware(async (to) => {
     console.error("[auth] failed to check membership", error);
     return;
   }
-  if (data) return;
+  if (data) {
+    if (ADMIN_ONLY_ROUTES.has(to.path) && data.role !== "admin") {
+      return navigateTo("/");
+    }
+    return;
+  }
 
   // No org membership — superadmins are intentionally org-less (they pick
   // an org to act on from the switcher), so skip the onboarding redirect.

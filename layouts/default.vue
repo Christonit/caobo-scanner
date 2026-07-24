@@ -74,9 +74,13 @@ const nav = [
   { to: "/activity", label: "Actividad", icon: "activity" },
 ];
 
-const navWithTeam = computed(() =>
+const navWithAdmin = computed(() =>
   isAdmin.value
-    ? [...nav, { to: "/team", label: "Equipo", icon: "users" }]
+    ? [
+        ...nav,
+        { to: "/leaderboard", label: "Consumo IA", icon: "chart" },
+        { to: "/team", label: "Equipo", icon: "users" },
+      ]
     : nav,
 );
 
@@ -231,7 +235,7 @@ function onSidebarLeave() {
           <!-- Nav -->
           <nav class="flex-1 space-y-0.5 overflow-y-auto px-3">
             <div
-              v-for="item in navWithTeam"
+              v-for="item in navWithAdmin"
               :key="item.label"
               :class="item.children && sidebarExpanded ? 'group/submenu' : ''"
             >
@@ -327,6 +331,21 @@ function onSidebarLeave() {
                       stroke-linejoin="round"
                       stroke-width="1.8"
                       d="M13 10V3L4 14h7v7l9-11h-7z"
+                    />
+                  </svg>
+                  <!-- chart -->
+                  <svg
+                    v-else-if="item.icon === 'chart'"
+                    class="h-5 w-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.8"
+                      d="M4 20h16M7 20v-6m5 6V8m5 12v-9"
                     />
                   </svg>
                   <!-- template -->

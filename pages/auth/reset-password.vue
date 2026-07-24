@@ -10,68 +10,148 @@ const error = ref<string | null>(null);
 const loading = ref(false);
 const ready = ref(false);
 const done = ref(false);
+// When the email link lands here with token_hash, wait for a human click
+// before verifyOtp — email security scanners otherwise burn the one-time
+// token on prefetch and the real user sees "expired".
+const needsConfirm = ref(false);
+const pendingTokenHash = ref<string | null>(null);
+const pendingType = ref<"recovery" | "invite">("recovery");
+const verifying = ref(false);
+
+async function redeemTokenHash() {
+  if (!pendingTokenHash.value) return;
+  verifying.value = true;
+  error.value = null;
+  console.log("[reset-password] verifying OTP token_hash…", {
+    type: pendingType.value,
+  });
+  const { data, error: verifyErr } = await supabase.auth.verifyOtp({
+    token_hash: pendingTokenHash.value,
+    type: pendingType.value,
+  });
+  console.log("[reset-password] verifyOtp result", {
+    error: verifyErr?.message ?? null,
+    hasSession: !!data?.session,
+  });
+  verifying.value = false;
+  if (verifyErr || !data?.session) {
+    needsConfirm.value = false;
+    error.value =
+      verifyErr?.message ||
+      "El enlace no es válido o ya expiró. Solicita uno nuevo.";
+    return;
+  }
+  needsConfirm.value = false;
+  ready.value = true;
+}
 
 onMounted(async () => {
-  // Step 1 — listen for auth events BEFORE doing anything else so we don't
-  // miss the PASSWORD_RECOVERY event that fires during code exchange.
+  const hash = window.location.hash.replace(/^#/, "");
+  const hashParams = new URLSearchParams(hash);
+  const queryParams = new URLSearchParams(window.location.search);
+
+  const tokenHash = queryParams.get("token_hash");
+  const code = queryParams.get("code");
+  const typeFromHash = hashParams.get("type");
+  const typeFromQuery = queryParams.get("type");
+  const accessTokenInHash = hashParams.get("access_token");
+
+  console.log("[reset-password] mounted", {
+    href: window.location.href,
+    tokenHash: tokenHash ? "present" : null,
+    code,
+    typeFromHash,
+    typeFromQuery,
+    accessTokenInHash: accessTokenInHash ? "present" : null,
+  });
+
+  // --- Path A: redirected here from /auth/callback, session already stored ---
+  const hasAnything =
+    tokenHash || code || typeFromHash || typeFromQuery || accessTokenInHash;
+  if (!hasAnything) {
+    console.log("[reset-password] Path A: no token in URL, checking session");
+    const { data } = await supabase.auth.getSession();
+    console.log("[reset-password] Path A: getSession result", {
+      hasSession: !!data.session,
+      userId: data.session?.user?.id,
+    });
+    if (data.session) {
+      ready.value = true;
+    } else {
+      error.value = "El enlace no es válido o ya expiró. Solicita uno nuevo.";
+    }
+    return;
+  }
+
+  // Primary path: pause for human confirmation before burning token_hash.
+  if (tokenHash) {
+    pendingTokenHash.value = tokenHash;
+    pendingType.value =
+      typeFromQuery === "invite" || typeFromHash === "invite"
+        ? "invite"
+        : "recovery";
+    needsConfirm.value = true;
+    return;
+  }
+
+  console.log("[reset-password] Path B: code/hash in URL, exchanging/waiting");
+
   const recoveryConfirmed = await new Promise<boolean>((resolve) => {
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") {
-        sub.subscription.unsubscribe();
-        resolve(true);
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("[reset-password] onAuthStateChange", {
+        event,
+        hasSession: !!session,
+      });
+      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
+        const isRecovery =
+          event === "PASSWORD_RECOVERY" ||
+          code ||
+          typeFromHash === "recovery" ||
+          typeFromQuery === "recovery";
+        console.log("[reset-password] isRecovery?", isRecovery);
+        if (isRecovery) {
+          sub.subscription.unsubscribe();
+          resolve(true);
+        }
       }
     });
 
-    // Step 2 — If this is a PKCE flow the URL has ?code=... with no type.
-    // Exchange it explicitly; this fires PASSWORD_RECOVERY above if it's a
-    // recovery token, or SIGNED_IN for an invite token.
-    const code = new URLSearchParams(window.location.search).get("code");
     if (code) {
-      (supabase.auth as any)
+      // Fallback: Auth codes expire in ~5 minutes and need a PKCE verifier.
+      console.log(
+        "[reset-password] exchanging code for session… (fallback, likely to fail for server-generated links)",
+      );
+      supabase.auth
         .exchangeCodeForSession(code)
-        .catch(() => null); // errors handled via missing event → timeout below
-    }
-
-    // Step 3 — Implicit flow: type=recovery is already in the hash/query.
-    const hash = window.location.hash.replace(/^#/, "");
-    const typeFromHash = new URLSearchParams(hash).get("type");
-    const typeFromQuery = new URLSearchParams(window.location.search).get("type");
-    if (typeFromHash === "recovery" || typeFromQuery === "recovery") {
-      // The supabase-js client will process the hash token automatically;
-      // PASSWORD_RECOVERY fires via onAuthStateChange above. Give it a moment.
-    }
-
-    // Step 4 — If the user was redirected here from /auth/callback and the
-    // session is already established (no code/hash in URL), check now.
-    const hasToken =
-      code ||
-      typeFromHash === "recovery" ||
-      typeFromQuery === "recovery" ||
-      new URLSearchParams(hash).get("access_token");
-
-    if (!hasToken) {
-      // No token in URL — this might be a redirect from the callback page
-      // which already exchanged the code. Check the existing session.
-      supabase.auth.getSession().then(({ data }) => {
-        if (data.session) {
-          sub.subscription.unsubscribe();
-          // We have a session but it came from an already-established recovery
-          // via the callback page. Trust it and show the form.
-          resolve(true);
-        } else {
-          // No session and no token — link is invalid or expired.
+        .then(({ error: exchangeErr, data }) => {
+          console.log("[reset-password] exchangeCodeForSession result", {
+            error: exchangeErr?.message ?? null,
+            hasSession: !!data?.session,
+          });
+          if (exchangeErr) {
+            sub.subscription.unsubscribe();
+            resolve(false);
+          }
+        })
+        .catch((e) => {
+          console.log("[reset-password] exchangeCodeForSession threw", e);
           sub.subscription.unsubscribe();
           resolve(false);
-        }
-      });
+        });
     }
 
-    // Safety timeout so we never hang indefinitely on a broken link.
     setTimeout(() => {
       sub.subscription.unsubscribe();
-      resolve(false);
+      supabase.auth.getSession().then(({ data }) => {
+        console.log("[reset-password] timeout fallback getSession", {
+          hasSession: !!data.session,
+        });
+        resolve(!!data.session);
+      });
     }, 6000);
   });
+
+  console.log("[reset-password] recoveryConfirmed =", recoveryConfirmed);
 
   if (recoveryConfirmed) {
     ready.value = true;
@@ -131,6 +211,27 @@ async function savePassword() {
         <p class="text-sm font-medium text-emerald-700">
           Contraseña actualizada. Redirigiendo…
         </p>
+      </div>
+
+      <div
+        v-else-if="needsConfirm"
+        class="space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm"
+      >
+        <p class="text-sm text-gray-600">
+          {{
+            pendingType === "invite"
+              ? "Confirma para aceptar la invitación y crear tu contraseña."
+              : "Confirma para continuar y crear tu nueva contraseña."
+          }}
+        </p>
+        <button
+          type="button"
+          :disabled="verifying"
+          class="w-full rounded-lg bg-gray-900 py-2.5 font-semibold text-white transition hover:bg-gray-800 disabled:opacity-50"
+          @click="redeemTokenHash"
+        >
+          {{ verifying ? "Verificando…" : "Continuar" }}
+        </button>
       </div>
 
       <div

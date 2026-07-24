@@ -260,4 +260,19 @@ Mark each critical field correct / incorrect / N/A:
 
 ---
 
+## Instrumentation (implemented)
+
+Feature-flagged telemetry for the pilot (`NUXT_PUBLIC_FEATURES_EFFECTIVENESS=true`):
+
+| Piece | Location |
+|-------|----------|
+| Tables | `effectiveness_sessions`, `effectiveness_runs` |
+| APIs | `server/api/effectiveness/**` (Nitro + `sendBeacon`) |
+| Client | `composables/useEffectivenessMetrics.ts` + hooks in `pages/index.vue` |
+| CSAT | Bueno / Malo modal ~3s after Excel export |
+
+**Session:** first PDF drop → export / discard / unload.  
+**Run:** each Procesar / reanálisis, with critical-field failure counts (empty / incomplete / invalid).  
+**CSAT:** binary only — correction load is counted programmatically, not asked in the survey.
+
 *Related: [scan-logging-and-analytics-plan.md](./scan-logging-and-analytics-plan.md), `pages/index.vue`, `python_backend/server.py`.*

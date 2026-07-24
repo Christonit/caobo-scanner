@@ -13,7 +13,7 @@
 //   if (features.isEnabled("auth")) { ... }
 //   <button v-if="features.auth"> ... </button>
 
-export type FeatureFlag = "auth" | "team";
+export type FeatureFlag = "auth" | "team" | "effectiveness";
 
 export interface FeatureFlagMap extends Record<FeatureFlag, boolean> {}
 
@@ -25,14 +25,25 @@ export interface FeatureFlagsApi extends FeatureFlagMap {
 const DEFAULTS: FeatureFlagMap = {
   auth: true,
   team: true,
+  effectiveness: false,
 };
+
+// Nuxt env overrides (`NUXT_PUBLIC_FEATURES_*`) arrive as strings. Coerce so
+// `isEnabled()` and truthiness checks stay consistent.
+function coerceFlag(value: unknown, fallback: boolean): boolean {
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  if (typeof value === "boolean") return value;
+  return fallback;
+}
 
 export function useFeatureFlags(): FeatureFlagsApi {
   const config = useRuntimeConfig();
-  const raw = (config.public.features ?? {}) as Partial<FeatureFlagMap>;
+  const raw = (config.public.features ?? {}) as Record<string, unknown>;
   const flags: FeatureFlagMap = {
-    auth: raw.auth ?? DEFAULTS.auth,
-    team: raw.team ?? DEFAULTS.team,
+    auth: coerceFlag(raw.auth, DEFAULTS.auth),
+    team: coerceFlag(raw.team, DEFAULTS.team),
+    effectiveness: coerceFlag(raw.effectiveness, DEFAULTS.effectiveness),
   };
 
   return {

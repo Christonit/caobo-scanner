@@ -69,21 +69,63 @@ const ownPasswordError = ref<string | null>(null);
 const ownPasswordSent = ref(false);
 
 async function resetOwnPassword() {
-  const email = user.value?.email as string | undefined;
-  if (!email) return;
+  const userId = user.value?.id as string | undefined;
+  if (!userId) return;
   resettingOwnPassword.value = true;
   ownPasswordError.value = null;
   ownPasswordSent.value = false;
   try {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/reset-password`,
+    // Route through our server endpoint so the email is sent via Resend
+    // (not Supabase's SMTP, which fails with "Error sending recovery email").
+    // Uses /api/auth/reset-password (self-service, no admin role required).
+    await $fetch("/api/auth/reset-password", {
+      method: "POST",
     });
-    if (error) throw error;
     ownPasswordSent.value = true;
   } catch (err: any) {
-    ownPasswordError.value = err?.message || "No se pudo enviar el correo.";
+    ownPasswordError.value =
+      err?.data?.statusMessage || err?.message || "No se pudo enviar el correo.";
   } finally {
     resettingOwnPassword.value = false;
+  }
+}
+
+// --- Direct password change (already authenticated — no email round-trip) --
+const newPassword = ref("");
+const confirmNewPassword = ref("");
+const changingPassword = ref(false);
+const changePasswordError = ref<string | null>(null);
+const changePasswordSuccess = ref(false);
+
+async function changeOwnPassword() {
+  changePasswordError.value = null;
+  changePasswordSuccess.value = false;
+
+  if (newPassword.value.length < 8) {
+    changePasswordError.value = "La contraseña debe tener al menos 8 caracteres.";
+    return;
+  }
+  if (newPassword.value !== confirmNewPassword.value) {
+    changePasswordError.value = "Las contraseñas no coinciden.";
+    return;
+  }
+
+  changingPassword.value = true;
+  try {
+    // Already signed in, so this updates the password directly — no need
+    // to email a reset link to yourself just to change it.
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword.value,
+    });
+    if (error) throw error;
+    changePasswordSuccess.value = true;
+    newPassword.value = "";
+    confirmNewPassword.value = "";
+    setTimeout(() => (changePasswordSuccess.value = false), 3000);
+  } catch (err: any) {
+    changePasswordError.value = err?.message || "No se pudo cambiar la contraseña.";
+  } finally {
+    changingPassword.value = false;
   }
 }
 
@@ -277,6 +319,45 @@ async function resetMemberPassword(member: MemberRow) {
       err?.data?.statusMessage || err?.message || "No se pudo enviar el correo.";
   } finally {
     resettingId.value = null;
+  }
+}
+
+// --- Eliminar miembro (solo si está deshabilitado) -----------------------------
+// Two-step by design: you must disable someone before deleting them, so a
+// stale/expired invite can't be nuked by accident. Deleting frees the email
+// address so a brand-new invite can be sent (a resent invite reuses the
+// existing pending user and its token history, which is what breaks when
+// links "won't stop expiring").
+const deletingId = ref<string | null>(null);
+const deleteError = ref<string | null>(null);
+
+async function deleteMember(member: MemberRow) {
+  if (!member.disabled) return;
+  if (
+    !window.confirm(
+      `¿Eliminar permanentemente a "${
+        member.fullName ?? member.email
+      }"? Podrás invitar de nuevo a este correo después.`,
+    )
+  )
+    return;
+
+  deletingId.value = member.id;
+  deleteError.value = null;
+  try {
+    await $fetch("/api/team/members/delete", {
+      method: "POST",
+      body: {
+        userId: member.id,
+        organizationId: activeOrg.value?.id,
+      },
+    });
+    members.value = members.value.filter((m) => m.id !== member.id);
+  } catch (err: any) {
+    deleteError.value =
+      err?.data?.statusMessage || err?.message || "No se pudo eliminar el miembro.";
+  } finally {
+    deletingId.value = null;
   }
 }
 
@@ -543,22 +624,75 @@ const {
         <div class="mt-5 border-t border-gray-100 pt-4">
           <p class="text-sm font-medium text-gray-700">Contraseña</p>
           <p class="mt-0.5 text-sm text-gray-500">
-            Te enviaremos un enlace a tu correo para crear una nueva contraseña.
+            Elige una contraseña nueva directamente, sin salir de esta página.
           </p>
-          <button
-            type="button"
-            :disabled="resettingOwnPassword"
-            class="mt-3 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
-            @click="resetOwnPassword"
+
+          <form
+            class="mt-3 max-w-sm space-y-2.5"
+            @submit.prevent="changeOwnPassword"
           >
-            {{ resettingOwnPassword ? "Enviando…" : "Restablecer mi contraseña" }}
-          </button>
-          <p v-if="ownPasswordError" class="mt-2 text-sm text-red-600">
-            {{ ownPasswordError }}
-          </p>
-          <p v-else-if="ownPasswordSent" class="mt-2 text-sm text-emerald-600">
-            Correo enviado a {{ user?.email }}.
-          </p>
+            <div>
+              <label for="new-password" class="sr-only">Nueva contraseña</label>
+              <input
+                id="new-password"
+                v-model="newPassword"
+                type="password"
+                minlength="8"
+                autocomplete="new-password"
+                placeholder="Nueva contraseña"
+                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+              />
+            </div>
+            <div>
+              <label for="confirm-new-password" class="sr-only">
+                Confirmar nueva contraseña
+              </label>
+              <input
+                id="confirm-new-password"
+                v-model="confirmNewPassword"
+                type="password"
+                minlength="8"
+                autocomplete="new-password"
+                placeholder="Confirmar nueva contraseña"
+                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+              />
+            </div>
+            <button
+              type="submit"
+              :disabled="changingPassword || !newPassword || !confirmNewPassword"
+              class="rounded-lg bg-gray-900 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:opacity-50"
+            >
+              {{ changingPassword ? "Guardando…" : "Cambiar contraseña" }}
+            </button>
+            <p v-if="changePasswordError" class="text-sm text-red-600">
+              {{ changePasswordError }}
+            </p>
+            <p v-else-if="changePasswordSuccess" class="text-sm text-emerald-600">
+              Contraseña actualizada.
+            </p>
+          </form>
+
+          <details class="mt-4 text-sm text-gray-500">
+            <summary class="cursor-pointer select-none font-medium text-gray-600 hover:text-gray-900">
+              ¿Prefieres recibir un enlace por correo?
+            </summary>
+            <div class="mt-2">
+              <button
+                type="button"
+                :disabled="resettingOwnPassword"
+                class="rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                @click="resetOwnPassword"
+              >
+                {{ resettingOwnPassword ? "Enviando…" : "Restablecer mi contraseña" }}
+              </button>
+              <p v-if="ownPasswordError" class="mt-2 text-sm text-red-600">
+                {{ ownPasswordError }}
+              </p>
+              <p v-else-if="ownPasswordSent" class="mt-2 text-sm text-emerald-600">
+                Correo enviado a {{ user?.email }}.
+              </p>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -954,6 +1088,12 @@ const {
               >
                 {{ toggleError }}
               </p>
+              <p
+                v-if="deleteError && deletingId !== m.id"
+                class="mt-1 text-xs text-red-600"
+              >
+                {{ deleteError }}
+              </p>
             </div>
 
             <div class="flex flex-shrink-0 items-center gap-2">
@@ -998,6 +1138,15 @@ const {
                       ? "Habilitar"
                       : "Deshabilitar"
                 }}
+              </button>
+              <button
+                v-if="m.disabled"
+                type="button"
+                :disabled="deletingId === m.id"
+                class="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                @click="deleteMember(m)"
+              >
+                {{ deletingId === m.id ? "Eliminando…" : "Eliminar" }}
               </button>
             </div>
           </li>

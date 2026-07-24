@@ -282,6 +282,7 @@ def _is_retryable_error(error: Exception) -> bool:
         or "resource_exhausted" in error_str
         or "500" in error_str or "502" in error_str or "503" in error_str
         or "timeout" in error_str or "empty response" in error_str
+        or "incomplete batch" in error_str
     )
 
 

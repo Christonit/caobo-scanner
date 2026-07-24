@@ -46,6 +46,14 @@ export default defineNuxtConfig({
       process.env.NUXT_SUPABASE_SECRET_KEY ||
       process.env.SUPABASE_SECRET_KEY ||
       "",
+    // Resend (team invite / password-reset emails). When set, those routes
+    // use generateLink + Resend HTTP instead of Supabase's SMTP sender.
+    resendApiKey: process.env.RESEND_API_KEY || "",
+    // Must be onboarding@resend.dev (test → your Resend account email only)
+    // or an address on a domain verified in Resend.
+    resendFromEmail:
+      process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
+    resendFromName: process.env.RESEND_FROM_NAME || "Caobo Recibos",
     public: {
       // Overridable at runtime with NUXT_PUBLIC_API_BASE (see useApiBase()).
       apiBase: process.env.NUXT_PUBLIC_API_BASE || "http://localhost:8000",
@@ -60,6 +68,10 @@ export default defineNuxtConfig({
       features: {
         auth: true,
         team: true,
+        // Tool effectiveness telemetry (session/run/CSAT beacons + tables).
+        // Off by default; enable only for the pilot org with
+        // NUXT_PUBLIC_FEATURES_EFFECTIVENESS=true.
+        effectiveness: false,
       },
     },
   },

@@ -1600,6 +1600,10 @@ def process_gastos_batch_with_gemini(
 
     Gemma is unreliable at multi-doc JSON arrays, so multi-file Gemma requests
     skip the single-shot batch and run parallel per-file calls instead.
+
+    Large multi-doc requests (> MAX_GEMINI_MULTI_DOC) are split into sequential
+    sub-batches — packing 15–25 images into one generateContent call routinely
+    truncates the JSON array (1 of N results) or times out.
     """
     import time
 
@@ -1628,6 +1632,35 @@ def process_gastos_batch_with_gemini(
             f"batch API; using parallel per-file for {len(files)} file(s)"
         )
         return _process_gastos_files_parallel(files, **parallel_kwargs)
+
+    # Cap single-shot multi-doc size. Override with MAX_GEMINI_MULTI_DOC.
+    max_multi = max(1, int(os.getenv("MAX_GEMINI_MULTI_DOC", "6")))
+    if len(files) > max_multi:
+        print(
+            f"[INFO] [GEMINI-BATCH] {len(files)} file(s) exceeds single-shot cap "
+            f"({max_multi}); processing in sequential sub-batches"
+        )
+        all_results: List[dict] = []
+        usages: list = []
+        for i in range(0, len(files), max_multi):
+            chunk = files[i : i + max_multi]
+            chunk_results, chunk_usage = process_gastos_batch_with_gemini(
+                chunk,
+                max_retries=max_retries,
+                concepto_catalog=concepto_catalog,
+                tipo_de_pago_catalog=tipo_de_pago_catalog,
+                concepto_document_comment=concepto_document_comment,
+                tipo_de_pago_document_comment=tipo_de_pago_document_comment,
+                business_rules=business_rules,
+                tipo_de_gasto_context=tipo_de_gasto_context,
+                tipo_de_gasto_document_comment=tipo_de_gasto_document_comment,
+                model_name=model_id,
+                spend_ctx=spend_ctx,
+            )
+            all_results.extend(chunk_results)
+            if chunk_usage:
+                usages.append(chunk_usage)
+        return all_results, merge_usage_records(usages)
 
     if not GEMINI_API_KEY:
         print("[ERROR] [GEMINI-BATCH] Cannot process batch: GEMINI_API_KEY not configured")
@@ -1728,8 +1761,10 @@ def process_gastos_batch_with_gemini(
                 f"prompt_chars={len(batch_prompt)})"
             )
 
-            # ~300-400 tokens/doc; keep headroom for larger batches.
-            max_out = min(16384, max(4096, 512 * len(files)))
+            # ~400–500 tokens/doc for full receipt JSON; leave headroom.
+            max_out = min(16384, max(4096, 768 * len(files)))
+            # Large image batches need more wall-clock than the 180s default.
+            timeout_s = max(180, 45 * max(1, len(files)))
             ctx = spend_ctx or {}
             level = ctx.get("thinking_level") or resolve_thinking_level(
                 None, model_id
@@ -1740,6 +1775,7 @@ def process_gastos_batch_with_gemini(
                 thinking_level=level,
                 max_output_tokens=max_out,
                 temperature=0.1,
+                timeout_s=timeout_s,
             )
 
             if not response or not getattr(response, "text", None):
@@ -1767,17 +1803,18 @@ def process_gastos_batch_with_gemini(
             if not isinstance(parsed, list):
                 raise ValueError(f"Expected JSON array from batch, got {type(parsed).__name__}")
 
+            # Truncated JSON (common on large batches) used to be padded with
+            # empty rows → every missing slot became "Reintentar". Treat a
+            # shortfall as a retryable failure so we fall back to parallel.
             if len(parsed) != len(files):
-                print(
-                    f"[WARNING] [GEMINI-BATCH] Expected {len(files)} results but "
-                    f"Gemini returned {len(parsed)} - padding/truncating to match. "
-                    f"Some entries will be empty."
+                raise ValueError(
+                    f"Incomplete batch: expected {len(files)} results, "
+                    f"Gemini returned {len(parsed)}"
                 )
 
-            # Pad / truncate to match input length so caller indexing is safe.
             results: List[dict] = []
             for i, (_, filename) in enumerate(files):
-                if i < len(parsed) and isinstance(parsed[i], dict):
+                if isinstance(parsed[i], dict):
                     normalized = _normalize_gastos_extracted(
                         parsed[i], filename,
                         concepto_catalog=concepto_catalog,
@@ -1796,11 +1833,10 @@ def process_gastos_batch_with_gemini(
                         )
                     results.append(normalized)
                 else:
-                    print(
-                        f"[ERROR] [GEMINI-BATCH] '{filename}': no matching entry "
-                        f"at index {i} in Gemini's response array, using empty result"
+                    raise ValueError(
+                        f"Incomplete batch: result #{i} for '{filename}' "
+                        f"is {type(parsed[i]).__name__}, expected object"
                     )
-                    results.append(_empty_gastos_extracted(filename))
             print(f"[INFO] [GEMINI-BATCH] Batch completed: {len(results)} result(s)")
             return results, usage_record
 
@@ -2100,7 +2136,8 @@ async def upload_batch(
     """
     Upload and process MULTIPLE receipt/invoice files in a SINGLE Gemini API call.
 
-    Accepts up to ~10 files. Supported formats: PNG / JPG / JPEG / PDF. PDFs are
+    Accepts multiple files (chunked server-side into groups of ~6 for the
+    Gemini multi-doc call). Supported formats: PNG / JPG / JPEG / PDF. PDFs are
     rasterized to images (one image per page, capped at PDF_MAX_PAGES) and all
     pages of a PDF are still represented as ONE entry in the response.
 

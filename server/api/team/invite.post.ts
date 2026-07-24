@@ -3,9 +3,12 @@ import { readBody } from "h3";
 // Invites a user by email into the caller's organization (or, for a
 // superadmin, whichever organization they've selected).
 //
-// - New email: Supabase invite + user_profiles + organization_members.
+// - New email: Auth invite link + user_profiles + organization_members.
 // - Existing user: add an organization_members row so they can switch into
 //   this org without replacing their current active membership.
+//
+// When RESEND_API_KEY is set, the invite link is emailed via Resend
+// (generateLink). Otherwise Supabase Auth SMTP sends it.
 export default defineEventHandler(async (event) => {
   const body = await readBody<{
     email?: string;
@@ -25,6 +28,7 @@ export default defineEventHandler(async (event) => {
   const admin = useSupabaseAdmin(event);
   const caller = await authorizeTeamCaller(event, admin, body?.organizationId);
   const siteUrl = getSiteUrl(event);
+  const redirectTo = `${siteUrl}/auth/callback`;
 
   // Look up an existing auth user first so we can add multi-org memberships
   // without sending a duplicate invite.
@@ -48,23 +52,36 @@ export default defineEventHandler(async (event) => {
     };
   }
 
-  const { data: invited, error: inviteError } = await admin.auth.admin.inviteUserByEmail(
-    email,
-    {
-      data: fullName ? { full_name: fullName } : undefined,
-      redirectTo: `${siteUrl}/auth/callback`,
-    }
-  );
+  let userId: string;
 
-  if (inviteError || !invited?.user) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: inviteError?.message || "No se pudo enviar la invitación.",
+  if (isResendConfigured()) {
+    const sent = await sendInviteEmailWithResend(admin, {
+      email,
+      fullName,
+      redirectTo,
     });
+    userId = sent.userId;
+  } else {
+    const { data: invited, error: inviteError } =
+      await admin.auth.admin.inviteUserByEmail(email, {
+        data: fullName ? { full_name: fullName } : undefined,
+        redirectTo,
+      });
+
+    if (inviteError || !invited?.user) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: formatEmailError(
+          inviteError,
+          "No se pudo enviar la invitación. Configura RESEND_API_KEY o Custom SMTP en Supabase.",
+        ),
+      });
+    }
+    userId = invited.user.id;
   }
 
   await ensureMember(admin, {
-    userId: invited.user.id,
+    userId,
     organizationId: caller.organizationId,
     role,
     fullName,
@@ -73,7 +90,7 @@ export default defineEventHandler(async (event) => {
 
   return {
     ok: true,
-    userId: invited.user.id,
+    userId,
     email,
     role,
     existing: false,
@@ -82,7 +99,7 @@ export default defineEventHandler(async (event) => {
 
 async function findAuthUserByEmail(
   admin: ReturnType<typeof useSupabaseAdmin>,
-  email: string
+  email: string,
 ) {
   for (let page = 1; page <= 5; page++) {
     const { data, error } = await admin.auth.admin.listUsers({
@@ -93,7 +110,7 @@ async function findAuthUserByEmail(
       throw createError({ statusCode: 500, statusMessage: error.message });
     }
     const found = data.users.find(
-      (u) => (u.email ?? "").toLowerCase() === email
+      (u) => (u.email ?? "").toLowerCase() === email,
     );
     if (found) return found;
     if (data.users.length < 200) break;
@@ -109,7 +126,7 @@ async function ensureMember(
     role: "admin" | "collaborator";
     fullName: string | null;
     setActiveProfile: boolean;
-  }
+  },
 ) {
   if (opts.setActiveProfile) {
     const { error: profileError } = await admin.from("user_profiles").upsert(
@@ -119,7 +136,7 @@ async function ensureMember(
         role: opts.role,
         full_name: opts.fullName,
       },
-      { onConflict: "id" }
+      { onConflict: "id" },
     );
     if (profileError) {
       throw createError({
@@ -159,7 +176,7 @@ async function ensureMember(
         organization_id: opts.organizationId,
         role: opts.role,
       },
-      { onConflict: "user_id,organization_id" }
+      { onConflict: "user_id,organization_id" },
     );
 
   if (

@@ -477,7 +477,11 @@
         <div
           class="max-h-[70vh] rounded-xl border border-gray-200 bg-white shadow-sm overflow-auto"
         >
-          <table class="w-full">
+          <table
+            class="w-full"
+            :inert="processing || undefined"
+            :class="{ 'opacity-60': processing }"
+          >
             <thead
               class="border-b border-slate-300 bg-gray-50 sticky top-0 z-50"
             >
@@ -492,7 +496,7 @@
                     :indeterminate.prop="
                       someVisibleSelected && !allVisibleSelected
                     "
-                    :disabled="filteredFiles.length === 0"
+                    :disabled="processing || filteredFiles.length === 0"
                     :title="
                       allVisibleSelected
                         ? 'Deseleccionar todas'
@@ -1390,6 +1394,26 @@
         <!-- Actions -->
         <div class="space-y-2 rounded-xl border border-gray-200 bg-white p-3">
           <button
+            v-if="showThinkingLevelRetry"
+            type="button"
+            @click="reanalyzeWithNewThinkingLevel"
+            :disabled="!canScan || processing || batchLimit.isLimited.value"
+            class="w-full rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+            :title="
+              !canScan
+                ? 'Selecciona cliente y documentos primero'
+                : batchLimit.isLimited.value
+                  ? `Límite alcanzado - espera ${batchLimit.label.value}`
+                  : 'Volver a analizar todas las filas con el nuevo nivel de pensamiento'
+            "
+          >
+            <template v-if="processing">Reanalizando…</template>
+            <template v-else-if="batchLimit.isLimited.value">
+              Enfriamiento · {{ batchLimit.label.value }}
+            </template>
+            <template v-else>Reanalizar de nuevo</template>
+          </button>
+          <button
             v-if="baseExportableFilesCount > 0"
             @click="requestExport"
             class="w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -2046,6 +2070,58 @@
     </div>
   </div>
 
+  <!-- CSAT: quick satisfaction check ~3s after Excel export -->
+  <div
+    v-if="csatPending"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="csat-title"
+  >
+    <div
+      class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl"
+    >
+      <h2 id="csat-title" class="text-lg font-semibold text-gray-900">
+        ¿Cómo estuvo este análisis?
+      </h2>
+      <p class="mt-2 text-sm text-slate-600">
+        Tu respuesta nos ayuda a medir la efectividad de la herramienta.
+      </p>
+      <div class="mt-5 flex gap-3">
+        <button
+          type="button"
+          class="flex-1 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
+          @click="answerCsat('good')"
+        >
+          Bueno
+        </button>
+        <button
+          type="button"
+          class="flex-1 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+          @click="answerCsat('bad')"
+        >
+          Malo
+        </button>
+      </div>
+      <textarea
+        v-model="csatComment"
+        rows="2"
+        maxlength="1000"
+        placeholder="Comentario (opcional)…"
+        class="mt-4 w-full resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+      />
+      <div class="mt-4 flex justify-end">
+        <button
+          type="button"
+          class="text-sm font-medium text-gray-500 transition hover:text-gray-700"
+          @click="skipCsat"
+        >
+          Omitir
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Leave confirmation: scan progress is not persisted -->
   <div
     v-if="leaveConfirmOpen"
@@ -2337,8 +2413,12 @@ import {
 import { onBeforeRouteLeave } from "vue-router";
 
 const API_BASE = useApiBase();
-const { model: thinkingModel } = useThinkingLevel();
+const { model: thinkingModel, thinkingLevel } = useThinkingLevel();
 const { appendSpendAttribution } = useSpendAttribution();
+
+// Thinking level used for the last AI run. When the user switches Pensamiento
+// after results exist, we surface a "Reanalizar de nuevo" action.
+const lastProcessedThinkingLevel = ref(null);
 
 // --- Client + ERP catalog selection (mandatory before scanning) ----------
 const { list: listClients } = useClients();
@@ -2351,6 +2431,24 @@ const { upsertFromScan, listByClient: listSuplidoresByClient } =
   useClientSuplidores();
 const { getByClient: getClientTaxColumnMapping } = useClientTaxColumnMapping();
 const { log: logActivity } = useActivityLog();
+
+// Tool effectiveness telemetry (feature-flagged; no-op when disabled).
+const effectiveness = useEffectivenessMetrics();
+const {
+  csatPending,
+  submitCsat: submitEffectivenessCsat,
+  dismissCsat: dismissEffectivenessCsat,
+} = effectiveness;
+const csatComment = ref("");
+
+function answerCsat(value) {
+  submitEffectivenessCsat(value, csatComment.value);
+  csatComment.value = "";
+}
+function skipCsat() {
+  dismissEffectivenessCsat();
+  csatComment.value = "";
+}
 
 // Extraction workflow id — groups analyze / defer / export / rescan events.
 // A new session starts on page load (clean), on discard/clear, and when
@@ -3507,6 +3605,14 @@ const showScanActions = computed(
   () => !hasPerformedAnalysis.value || processing.value,
 );
 
+/** Pensamiento changed since the last AI run and there are rows to re-scan. */
+const showThinkingLevelRetry = computed(
+  () =>
+    hasPerformedAnalysis.value &&
+    lastProcessedThinkingLevel.value != null &&
+    lastProcessedThinkingLevel.value !== thinkingLevel.value,
+);
+
 const columns = computed(() =>
   showFullTableColumns.value
     ? ALL_COLUMNS
@@ -3744,6 +3850,9 @@ const reanalyzeSelectedFiles = async () => {
     beginExtractionSession();
   }
 
+  const runStartedIso = new Date().toISOString();
+  const runStart = performance.now();
+  const attempted = [];
   for (const file of selected) {
     if (individualLimit.isLimited.value) {
       alert(
@@ -3754,7 +3863,40 @@ const reanalyzeSelectedFiles = async () => {
       break;
     }
     await runSingleFileEvaluation(file);
+    attempted.push(file);
   }
+
+  // Effectiveness: one reanalysis run covering the rows we re-scanned.
+  effectiveness.recordRun({
+    rows: attempted
+      .filter((f) => f.status === "done")
+      .map((f) => f.editableData),
+    isReanalysis: true,
+    aiDurationMs: performance.now() - runStart,
+    startedAt: runStartedIso,
+    finishedAt: new Date().toISOString(),
+  });
+  lastProcessedThinkingLevel.value = thinkingLevel.value;
+};
+
+/** Reset analyzed rows to pending and re-run Procesar with the new Pensamiento. */
+const reanalyzeWithNewThinkingLevel = async () => {
+  if (!canScan.value || processing.value) return;
+
+  const targets = files.value.filter(
+    (f) =>
+      !f.reviewLater &&
+      (f.status === "done" ||
+        f.status === "error" ||
+        f.status === "duplicate" ||
+        f.status === "needs_retry"),
+  );
+  if (!targets.length) return;
+
+  for (const file of targets) {
+    file.status = "pending";
+  }
+  await processAll();
 };
 
 // Clear selection when switching tabs so bulk actions stay scoped.
@@ -3815,6 +3957,8 @@ onBeforeUnmount(() => {
   }
   closePreview();
   files.value.forEach(revokeFileObjectUrl);
+  // Leaving the page in-app closes an unfinished session as abandoned.
+  effectiveness.endSession("abandoned");
 });
 
 // Warn when leaving after a scan (in-app navigation → modal; reload/close →
@@ -3827,6 +3971,9 @@ const hasUnsavedScanProgress = computed(() =>
 );
 
 const onBeforeUnload = (event) => {
+  // Reload / tab close ends an unfinished session as abandoned (no-op if the
+  // session was already exported/discarded).
+  effectiveness.endSession("abandoned");
   if (!hasUnsavedScanProgress.value) return;
   event.preventDefault();
   event.returnValue = "";
@@ -4177,6 +4324,9 @@ const addFiles = async (fileList) => {
     "image/jpg",
   ];
 
+  // First drop of a fresh queue starts the effectiveness session clock.
+  const wasEmpty = files.value.length === 0;
+
   for (const file of fileList) {
     if (!validTypes.includes(file.type)) {
       alert(`${file.name} no es un tipo de archivo soportado`);
@@ -4236,6 +4386,13 @@ const addFiles = async (fileList) => {
       });
     }
   }
+
+  if (wasEmpty && files.value.length > 0) {
+    effectiveness.startSession(
+      extractionSessionId.value || beginExtractionSession(),
+      { clientId: selectedClientId.value || null, clientName: selectedClientName() },
+    );
+  }
 };
 
 const startEditing = (file) => {
@@ -4257,6 +4414,11 @@ const openDescripcionEditor = async (file) => {
 const closeDescripcionEditor = () => {
   descripcionEditorFile.value = null;
 };
+
+// Don't leave editable overlays open while a batch is re-scanning.
+watch(processing, (isProcessing) => {
+  if (isProcessing) closeDescripcionEditor();
+});
 
 const isEdited = (file) => {
   if (!file.originalData) return false;
@@ -4523,8 +4685,23 @@ const runSingleFileEvaluation = async (fileItem) => {
   }
 };
 
-const retryFile = (fileItem) => runSingleFileEvaluation(fileItem);
-const reevaluateFile = (fileItem) => runSingleFileEvaluation(fileItem);
+// Single-row retry / re-evaluate → one reanalysis run for effectiveness.
+const runSingleWithMetrics = async (fileItem) => {
+  const runStartedIso = new Date().toISOString();
+  const runStart = performance.now();
+  await runSingleFileEvaluation(fileItem);
+  if (fileItem.status === "done") {
+    effectiveness.recordRun({
+      rows: [fileItem.editableData],
+      isReanalysis: true,
+      aiDurationMs: performance.now() - runStart,
+      startedAt: runStartedIso,
+      finishedAt: new Date().toISOString(),
+    });
+  }
+};
+const retryFile = (fileItem) => runSingleWithMetrics(fileItem);
+const reevaluateFile = (fileItem) => runSingleWithMetrics(fileItem);
 
 const isImageFile = (file) => {
   return file.file.type.startsWith("image/");
@@ -4724,24 +4901,35 @@ const processAll = async () => {
   const pendingFiles = files.value.filter(
     (f) => f.status === "pending" && !f.reviewLater,
   );
-  // Fresh extraction (nothing analyzed yet) starts a new session; rescans /
-  // re-process keep the current one so attempts group together.
+  // Keep the extraction session minted at page load / discard / first drop so
+  // effectiveness timing starts at PDF drop, not at Procesar. Only mint if
+  // somehow missing (e.g. after export closed the previous workflow).
+  if (!extractionSessionId.value) {
+    beginExtractionSession();
+  }
+  // Anything already analyzed before this run makes it a re-analysis / rescan.
   const hasPriorResults = files.value.some(
     (f) =>
       (f.status === "done" || f.status === "duplicate") &&
       !pendingFiles.includes(f),
   );
-  if (!extractionSessionId.value || !hasPriorResults) {
-    beginExtractionSession();
-  }
-  // Anything already analyzed before this run makes it a re-analysis / rescan.
   const wasRescan = hasPriorResults;
+
+  // Ensure a session exists even if files were added before the flag was on.
+  effectiveness.startSession(
+    extractionSessionId.value || beginExtractionSession(),
+    { clientId: selectedClientId.value || null, clientName: selectedClientName() },
+  );
 
   processing.value = true;
   totalProcessingTime.value = 0;
   const overallStartTime = performance.now();
+  const runStartedIso = new Date().toISOString();
 
-  const BATCH_SIZE = 25;
+  // Keep multi-doc Gemini calls small: large batches (15–25 images) often
+  // truncate JSON output or exceed practical latency → every row lands on
+  // "Reintentar". ~6 matches the backend single-shot cap.
+  const BATCH_SIZE = 6;
   let stoppedForCooldown = false;
 
   for (let i = 0; i < pendingFiles.length; i += BATCH_SIZE) {
@@ -4926,6 +5114,22 @@ const processAll = async () => {
         duration_ms: Math.round(totalProcessingTime.value),
       }),
     });
+  }
+
+  // Effectiveness: score first-pass critical fields on the rows this run
+  // produced usable data for.
+  effectiveness.recordRun({
+    rows: pendingFiles
+      .filter((f) => f.status === "done")
+      .map((f) => f.editableData),
+    isReanalysis: wasRescan,
+    aiDurationMs: totalProcessingTime.value,
+    startedAt: runStartedIso,
+    finishedAt: new Date().toISOString(),
+  });
+
+  if (pendingFiles.length > 0) {
+    lastProcessedThinkingLevel.value = thinkingLevel.value;
   }
 
   if (stoppedForCooldown) {
@@ -5191,6 +5395,11 @@ const downloadExcel = async () => {
       targetLabel: selectedClientName(),
       metadata: withSession({ pages: filesData.length }),
     });
+    effectiveness.endSession("exported");
+    // Ask Bueno/Malo ~3s after download; still attributed to this session.
+    effectiveness.requestCsatAfterExport();
+    // Next batch gets a fresh workflow id (and a new effectiveness session).
+    beginExtractionSession();
   } catch (error) {
     console.error("Error downloading file:", error);
     alert("Error al descargar el archivo Excel");
@@ -5208,8 +5417,11 @@ const clearFiles = () => {
   if (fileInput.value) {
     fileInput.value.value = "";
   }
-  // Discard everything → new extraction session for the next run.
+  // Discard everything → close the effectiveness session, then start a new
+  // extraction session for the next run.
+  effectiveness.endSession("discarded");
   beginExtractionSession();
+  lastProcessedThinkingLevel.value = null;
 };
 </script>
 

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 definePageMeta({ layout: false });
 
-const supabase = useSupabaseClient();
 const user = useSupabaseUser();
 const router = useRouter();
 
@@ -17,18 +16,27 @@ watchEffect(() => {
 async function requestReset() {
   error.value = null;
   loading.value = true;
-  const { error: err } = await supabase.auth.resetPasswordForEmail(
-    email.value.trim(),
-    {
-      redirectTo: `${window.location.origin}/auth/reset-password`,
-    }
-  );
-  loading.value = false;
-  if (err) {
-    error.value = err.message;
-    return;
+  try {
+    // Routed through the server (see server/api/auth/forgot-password.post.ts)
+    // rather than calling supabase.auth.resetPasswordForEmail() directly from
+    // the browser. That client-side call stores a PKCE code_verifier in
+    // *this* browser's storage and mails a `?code=...` link that only works
+    // if opened back in this exact browser — it fails everywhere else with
+    // "PKCE code verifier not found in storage". The server route instead
+    // mails a token_hash link that works from any device/browser.
+    await $fetch("/api/auth/forgot-password", {
+      method: "POST",
+      body: { email: email.value.trim() },
+    });
+    sent.value = true;
+  } catch (e: unknown) {
+    const message =
+      (e as { data?: { statusMessage?: string } })?.data?.statusMessage ||
+      "No se pudo enviar el correo. Intenta de nuevo.";
+    error.value = message;
+  } finally {
+    loading.value = false;
   }
-  sent.value = true;
 }
 </script>
 

@@ -1,8 +1,7 @@
 import { readBody } from "h3";
 
-// Re-sends the Supabase invite email for a pending (unconfirmed) member.
-// GoTrue's admin invite endpoint regenerates the token and emails again when
-// the user already exists but has not confirmed yet.
+// Re-sends the invite email for a pending (unconfirmed) member.
+// Prefer Resend + generateLink when configured; otherwise GoTrue SMTP.
 export default defineEventHandler(async (event) => {
   const body = await readBody<{
     userId?: string;
@@ -31,7 +30,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const { data: authUser, error: authUserError } = await admin.auth.admin.getUserById(
-    userId
+    userId,
   );
   if (authUserError || !authUser?.user?.email) {
     throw createError({
@@ -48,25 +47,38 @@ export default defineEventHandler(async (event) => {
   }
 
   const siteUrl = getSiteUrl(event);
+  const redirectTo = `${siteUrl}/auth/callback`;
   const fullName =
     targetProfile.full_name ||
     (authUser.user.user_metadata?.full_name as string | undefined) ||
     null;
+  const email = authUser.user.email;
 
-  const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(
-    authUser.user.email,
-    {
-      data: fullName ? { full_name: fullName } : undefined,
-      redirectTo: `${siteUrl}/auth/callback`,
-    }
-  );
-
-  if (inviteError) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: inviteError.message || "No se pudo reenviar la invitación.",
+  if (isResendConfigured()) {
+    await sendInviteEmailWithResend(admin, {
+      email,
+      fullName,
+      redirectTo,
     });
+  } else {
+    const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(
+      email,
+      {
+        data: fullName ? { full_name: fullName } : undefined,
+        redirectTo,
+      },
+    );
+
+    if (inviteError) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: formatEmailError(
+          inviteError,
+          "No se pudo reenviar la invitación. Configura RESEND_API_KEY o Custom SMTP en Supabase.",
+        ),
+      });
+    }
   }
 
-  return { ok: true, email: authUser.user.email };
+  return { ok: true, email };
 });

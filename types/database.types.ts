@@ -35,6 +35,25 @@ export type ActivityAction =
 // Matches public.api_token_usage.thinking_level and the UI selector.
 export type ThinkingLevel = "rapido" | "moderado" | "profundo";
 
+// Lifecycle of an effectiveness_sessions row (see the effectiveness_metrics
+// migration CHECK constraint).
+export type EffectivenessSessionStatus =
+  | "in_progress"
+  | "exported"
+  | "discarded"
+  | "abandoned";
+
+// Binary customer-satisfaction answer captured after the first Procesar.
+export type EffectivenessCsat = "good" | "bad";
+
+// Why a critical field failed on the first AI pass. Counted programmatically
+// from the extractor output before human edits.
+export type EffectivenessFailureReason =
+  | "empty"
+  | "incomplete"
+  | "invalid_length"
+  | "required_missing";
+
 export type Database = {
   public: {
     Tables: {
@@ -402,6 +421,110 @@ export type Database = {
         };
         Update: {
           metadata?: Record<string, unknown>;
+        };
+      };
+      effectiveness_sessions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          user_id: string | null;
+          user_email: string | null;
+          client_id: string | null;
+          client_name: string | null;
+          status: EffectivenessSessionStatus;
+          started_at: string;
+          ended_at: string | null;
+          first_process_at: string | null;
+          first_process_ai_ms: number | null;
+          total_ai_ms: number;
+          page_count: number;
+          reanalysis_count: number;
+          csat: EffectivenessCsat | null;
+          csat_at: string | null;
+          csat_comment: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          organization_id: string;
+          user_id?: string | null;
+          user_email?: string | null;
+          client_id?: string | null;
+          client_name?: string | null;
+          status?: EffectivenessSessionStatus;
+          started_at?: string;
+          ended_at?: string | null;
+          first_process_at?: string | null;
+          first_process_ai_ms?: number | null;
+          total_ai_ms?: number;
+          page_count?: number;
+          reanalysis_count?: number;
+          csat?: EffectivenessCsat | null;
+          csat_at?: string | null;
+          csat_comment?: string | null;
+        };
+        Update: {
+          client_id?: string | null;
+          client_name?: string | null;
+          status?: EffectivenessSessionStatus;
+          ended_at?: string | null;
+          first_process_at?: string | null;
+          first_process_ai_ms?: number | null;
+          total_ai_ms?: number;
+          page_count?: number;
+          reanalysis_count?: number;
+          csat?: EffectivenessCsat | null;
+          csat_at?: string | null;
+          csat_comment?: string | null;
+          updated_at?: string;
+        };
+      };
+      effectiveness_runs: {
+        Row: {
+          id: string;
+          session_id: string;
+          organization_id: string;
+          user_id: string | null;
+          client_id: string | null;
+          run_index: number;
+          is_reanalysis: boolean;
+          pages_in_run: number;
+          ai_duration_ms: number | null;
+          pages_ok: number;
+          pages_with_failures: number;
+          correctness_pct: number | null;
+          field_failures: Record<string, number>;
+          failure_reasons: Record<string, Record<string, number>>;
+          started_at: string | null;
+          finished_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          organization_id: string;
+          user_id?: string | null;
+          client_id?: string | null;
+          run_index: number;
+          is_reanalysis?: boolean;
+          pages_in_run?: number;
+          ai_duration_ms?: number | null;
+          pages_ok?: number;
+          pages_with_failures?: number;
+          correctness_pct?: number | null;
+          field_failures?: Record<string, number>;
+          failure_reasons?: Record<string, Record<string, number>>;
+          started_at?: string | null;
+          finished_at?: string | null;
+        };
+        Update: {
+          pages_ok?: number;
+          pages_with_failures?: number;
+          correctness_pct?: number | null;
+          field_failures?: Record<string, number>;
+          failure_reasons?: Record<string, Record<string, number>>;
+          finished_at?: string | null;
         };
       };
       templates: {
